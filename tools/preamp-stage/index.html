@@ -106,15 +106,18 @@
 .report-section[hidden]{display:none}
 .report-section > .sec-title{margin-bottom:.7rem;display:block}
 
-/* ── Glossary (full-result-cards terms) ─────────────────────────────────── */
+/* ── Glossary (result-cards + network terms) ────────────────────────────── */
 .glossary-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem 1.5rem}
+.glossary-group-title{grid-column:1/-1;font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.09em;font-weight:600;margin-bottom:-.25rem}
+.glossary-group-title:not(:first-child){margin-top:.5rem}
 .glossary-entry{padding:.65rem .8rem;background:var(--color-bg-secondary);border-radius:var(--radius-md)}
 .glossary-term{font-size:14px;font-weight:700;color:var(--color-text);font-family:var(--font-mono);margin-bottom:.35rem}
 .glossary-tag{font-size:11px;font-weight:500;color:var(--color-text-tertiary);font-family:var(--font-sans);margin-left:6px;letter-spacing:.02em}
-.glossary-how,.glossary-what{font-size:12.5px;color:var(--color-text-secondary);line-height:1.55;margin:0 0 .35rem}
-.glossary-what{margin-bottom:0}
+.glossary-how,.glossary-what,.glossary-sonic{font-size:12.5px;color:var(--color-text-secondary);line-height:1.55;margin:0 0 .35rem}
+.glossary-sonic{margin-bottom:0;padding-top:.3rem;border-top:1px dashed var(--color-border-light)}
+.glossary-sonic strong{color:var(--color-accent)}
 .glossary-how strong,.glossary-what strong{color:var(--color-text);font-weight:600}
-.glossary-how sub,.glossary-what sub{font-size:.75em}
+.glossary-how sub,.glossary-what sub,.glossary-sonic sub{font-size:.75em}
 .report-row{display:grid;gap:1rem}
 .report-row.two-col{grid-template-columns:1fr 1fr}
 /* Signal-flow row for the result cards: V1A | Network | V1B. The middle
@@ -628,58 +631,134 @@
       </div>
     </div>
 
-    <!-- Glossary for every term in the Full result cards: how each number is
-         computed by this tool and what it tells you about the circuit. -->
+    <!-- Glossary for every term in the Full result cards (stage + network):
+         what it is, how this tool computes it, what it does to the circuit,
+         and which component changes move it — with sonic outcomes. -->
     <div class="report-section" data-report="glossary">
-      <span class="sec-title">Glossary &nbsp;&middot;&nbsp; full result cards</span>
+      <span class="sec-title">Glossary &nbsp;&middot;&nbsp; result cards &amp; network</span>
       <div class="glossary-grid">
+
+        <span class="glossary-group-title">Stage terms &nbsp;&middot;&nbsp; V1A / V1B</span>
 
         <div class="glossary-entry">
           <div class="glossary-term">gm <span class="glossary-tag">transconductance &middot; mA/V</span></div>
           <p class="glossary-how"><strong>Calculated:</strong> central finite difference on the Koren tube model at the DC operating point &mdash; gm&nbsp;=&nbsp;[I<sub>p</sub>(V<sub>p</sub>, V<sub>gk</sub>+10&nbsp;mV) &minus; I<sub>p</sub>(V<sub>p</sub>, V<sub>gk</sub>&minus;10&nbsp;mV)]&nbsp;/&nbsp;20&nbsp;mV.</p>
-          <p class="glossary-what"><strong>Means:</strong> how much plate current moves per volt of grid swing &mdash; the engine of the stage's gain (&mu;&nbsp;=&nbsp;gm&middot;r<sub>p</sub>). It is an operating-point property, not a tube constant: a colder bias (larger Rk, lower B+) lowers gm and with it the available gain.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> how much plate current moves per volt of grid swing &mdash; the engine of gain (&mu;&nbsp;=&nbsp;gm&middot;r<sub>p</sub>). An operating-point property, not a tube constant: colder bias means lower gm.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> you steer gm through bias and tube choice. Shrink R<sub>k</sub> (1.5k&nbsp;&rarr;&nbsp;820&nbsp;&Omega;) or raise B+ for a hotter bias &mdash; more gain, earlier breakup. Swap the 12AX7 for a 5751 or 12AY7 to drop gm: cleaner, more touch-dynamic front end (the classic vintage-amp clean-up move).</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">rp <span class="glossary-tag">dynamic plate resistance &middot; k&Omega;</span></div>
           <p class="glossary-how"><strong>Calculated:</strong> central difference on the same model &mdash; r<sub>p</sub>&nbsp;=&nbsp;20&nbsp;mV&nbsp;/&nbsp;[I<sub>p</sub>(V<sub>p</sub>+10&nbsp;mV) &minus; I<sub>p</sub>(V<sub>p</sub>&minus;10&nbsp;mV)] at fixed V<sub>gk</sub>.</p>
-          <p class="glossary-what"><strong>Means:</strong> the tube's internal AC resistance looking into the plate. It forms the gain divider with the load &mdash; A<sub>v</sub>&nbsp;=&nbsp;&minus;&mu;&middot;R<sub>a</sub>/(r<sub>p</sub>+R<sub>a</sub>) where R<sub>a</sub>&nbsp;=&nbsp;R<sub>p</sub>&nbsp;&#8741;&nbsp;R<sub>load</sub> &mdash; and dominates Output&nbsp;Z. Lower-&mu; tubes (12AY7, 12AT7) have much lower r<sub>p</sub> than a 12AX7.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the tube's internal AC resistance at the plate. Sets gain via A<sub>v</sub>&nbsp;=&nbsp;&minus;&mu;&middot;R<sub>a</sub>/(r<sub>p</sub>+R<sub>a</sub>), R<sub>a</sub>&nbsp;=&nbsp;R<sub>p</sub>&nbsp;&#8741;&nbsp;R<sub>load</sub>, and dominates Output&nbsp;Z.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> low-r<sub>p</sub> tubes (12AY7, 12AT7) drive the next network stiffly &mdash; tighter bass, less loading interaction. Raising R<sub>p</sub> (100k&nbsp;&rarr;&nbsp;220k) buys gain but adds "give"; watch the load line flatten on the plate-curves chart as you try it.</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Input Z <span class="glossary-tag">mid-band input impedance &middot; k&Omega; / M&Omega;</span></div>
-          <p class="glossary-how"><strong>Calculated:</strong> Z<sub>in</sub>&nbsp;=&nbsp;R<sub>g</sub> (grid stopper) + grid return. For V1A the return is the assumed 1&nbsp;M&Omega; source-side grid leak; for V1B it is the interstage pot's wiper-to-ground section, so it changes with the Vol setting.</p>
-          <p class="glossary-what"><strong>Means:</strong> the resistive load this stage presents to whatever drives it at mid frequencies. At high frequencies the effective input impedance falls because of Miller capacitance (C<sub>ga</sub> magnified by the stage gain) &mdash; that effect appears in the frequency-response charts, not in this number.</p>
+          <p class="glossary-how"><strong>Calculated:</strong> Z<sub>in</sub>&nbsp;=&nbsp;R<sub>g</sub> (grid stopper) + grid return. V1A: assumed 1&nbsp;M&Omega; source-side leak; V1B: the interstage pot's wiper-to-ground section, so it moves with Vol.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the resistive load this stage presents to its driver at mid frequencies. The HF input impedance falls with Miller capacitance (C<sub>ga</sub> magnified by stage gain) &mdash; visible in the Bode charts, not in this number.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> the grid stopper is the practical knob. Raise R<sub>g</sub> (68k&nbsp;&rarr;&nbsp;220&ndash;470k) and the Miller corner drops &mdash; smoother, darker, less fizz under gain (a primary high-gain voicing trick). Lower it for brighter, sharper attack.</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Output Z <span class="glossary-tag">mid-band output impedance &middot; k&Omega;</span></div>
           <p class="glossary-how"><strong>Calculated:</strong> bypassed cathode: r<sub>p</sub>&nbsp;&#8741;&nbsp;R<sub>p</sub>. Unbypassed: (r<sub>p</sub>&nbsp;+&nbsp;(&mu;+1)&middot;R<sub>k</sub>)&nbsp;&#8741;&nbsp;R<sub>p</sub> &mdash; cathode feedback raises the tube's effective plate resistance.</p>
-          <p class="glossary-what"><strong>Means:</strong> the source impedance driving the next network. It sets the coupling-cap high-pass corner, feeds the output node's looking-back Z, and determines how much the stage sags when the next stage draws grid current. Removing a bypass cap visibly raises it.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the source impedance driving the next network &mdash; sets the coupling-cap high-pass corner, feeds the output node's looking-back Z, and scales how hard downstream grid current sags this stage.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> pull the bypass cap and Output&nbsp;Z roughly doubles &mdash; leaner, tighter, more "stringy" with the same parts. Smaller R<sub>p</sub> or a lower-r<sub>p</sub> tube stiffens the drive, pushing fuller lows through the same coupling cap (the HP corner falls).</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Output <span class="glossary-tag">delivered swing &middot; Vpp</span></div>
           <p class="glossary-how"><strong>Calculated:</strong> measured peak-to-peak of the settled time-domain simulation at this stage's coupling-cap output, at the current Input / Tone / Vol settings &mdash; clipping, compression and bias shift included.</p>
-          <p class="glossary-what"><strong>Means:</strong> the swing the stage is delivering <em>right now</em>, as a scope would show it. Compare against Gain&nbsp;&times;&nbsp;input: when Output is much less than that linear estimate, the stage is limiting (see the waveform's clip readouts for which edge).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the swing actually delivered <em>right now</em>, as a scope would show it. The gap below Gain&nbsp;&times;&nbsp;input is your compression/clipping.</p>
+          <p class="glossary-sonic"><strong>Use it:</strong> compare against the <em>next</em> stage's Max&nbsp;in: raise Vol until Output exceeds it and that's exactly where second-stage breakup begins. Designing a clean machine? Keep Output under downstream Max&nbsp;in with a few dB to spare.</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Grid shift <span class="glossary-tag">operating-point displacement &middot; V</span></div>
-          <p class="glossary-how"><strong>Calculated:</strong> mean(V<sub>gk</sub>) over the settled capture window minus its quiescent value (&minus;V<sub>k</sub>) &mdash; i.e. how far the average grid-cathode voltage has moved from idle.</p>
-          <p class="glossary-what"><strong>Means:</strong> the total DC displacement of the operating point under drive. Negative = pushed toward cutoff. It lumps together blocking charge on the coupling cap <em>and</em> benign effects (cathode sag, AC re-centering of an asymmetric waveform) &mdash; the Block meter in the headline strip isolates just the grid-current-caused part.</p>
+          <p class="glossary-how"><strong>Calculated:</strong> mean(V<sub>gk</sub>) over the settled capture window minus its quiescent value (&minus;V<sub>k</sub>).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> total DC displacement of the operating point under drive &mdash; blocking charge <em>plus</em> benign cathode sag and AC re-centering. Negative = pushed toward cutoff. The Block meter isolates just the grid-current part.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> a large negative value under drive is the "ducks after every hit" feel. Tame it with a smaller interstage cap, a bigger grid stopper on the driven stage, less drive into the stage, or a lower-&mu; tube with more bias headroom.</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Bias excursion <span class="glossary-tag">cathode drift &middot; V</span></div>
-          <p class="glossary-how"><strong>Calculated:</strong> mean(instantaneous V<sub>k</sub>) over the settled window minus the quiescent V<sub>k</sub>. The bypass cap holds the cathode with &tau;&nbsp;=&nbsp;R<sub>k</sub>&middot;C<sub>k</sub>, so asymmetric average plate current charges it away from idle.</p>
-          <p class="glossary-what"><strong>Means:</strong> the slow cathode-bias drift under sustained signal &mdash; the "compression" or sag component of tube feel. Positive = average plate current rose and the stage rebiased itself colder. Near zero for clean signals or unbypassed cathodes (V<sub>k</sub> then tracks instantly instead of drifting).</p>
+          <p class="glossary-how"><strong>Calculated:</strong> mean(instantaneous V<sub>k</sub>) over the settled window minus quiescent V<sub>k</sub> &mdash; the bypass cap holds the cathode with &tau;&nbsp;=&nbsp;R<sub>k</sub>&middot;C<sub>k</sub>, so asymmetric plate current charges it away from idle.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> slow self-rebias under sustained signal &mdash; the compression component of "tube feel." Positive = average plate current rose, stage drifted colder.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> bigger C<sub>k</sub> (25&micro;&nbsp;&rarr;&nbsp;100&micro;) lengthens the bloom/squash on held notes. Remove C<sub>k</sub> and excursion vanishes &mdash; stiffer, faster feel and ~6&nbsp;dB less gain. A partial bypass (0.68&ndash;1&nbsp;&micro;F) trades sag for a treble-tilted gain shelf (see the Ck curve in the Bode chart).</p>
         </div>
 
         <div class="glossary-entry">
           <div class="glossary-term">Block rec <span class="glossary-tag">blocking recovery &middot; ms</span></div>
-          <p class="glossary-how"><strong>Calculated:</strong> the stage's input coupling cap times its discharge path. V1A: C<sub>in</sub>&nbsp;&times;&nbsp;1&nbsp;M&Omega; grid leak. V1B: V1A's C<sub>out</sub>&nbsp;&times;&nbsp;(R<sub>series</sub>&nbsp;+&nbsp;R<sub>pot</sub>&nbsp;+&nbsp;Z<sub>out&nbsp;V1A</sub>).</p>
-          <p class="glossary-what"><strong>Means:</strong> how long the stage stays choked after an overdriven transient &mdash; the recovery time constant of blocking distortion. Smaller coupling caps recover faster (resist blocking); larger caps don't block <em>deeper</em> at steady state, they choke <em>longer</em>. "&mdash;" on V1A means no input cap: a DC-coupled stage cannot block.</p>
+          <p class="glossary-how"><strong>Calculated:</strong> the stage's input coupling cap &times; its discharge path. V1A: C<sub>in</sub>&nbsp;&times;&nbsp;1&nbsp;M&Omega;. V1B: V1A's C<sub>out</sub>&nbsp;&times;&nbsp;(R<sub>series</sub>&nbsp;+&nbsp;R<sub>pot</sub>&nbsp;+&nbsp;Z<sub>out&nbsp;V1A</sub>).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> how long the stage stays choked after an overdriven transient. Caps don't block <em>deeper</em> when bigger &mdash; they choke <em>longer</em>. "&mdash;" on V1A means no input cap: a DC-coupled stage cannot block.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> THE tightness control for high gain. Drop the interstage cap 22n&nbsp;&rarr;&nbsp;2.2n and recovery gets ~10&times; faster &mdash; palm mutes stay tight, no bass flub &mdash; at the cost of low end through that stage (the HP corner rises; check the Bode chart). 22n+ = full, vintage, slower to recover.</p>
+        </div>
+
+        <span class="glossary-group-title">Network terms &nbsp;&middot;&nbsp; interstage &amp; output</span>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Attenuation <span class="glossary-tag">interstage divider &middot; dB</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> 20&middot;log<sub>10</sub>[R<sub>pot_bot</sub>&nbsp;/&nbsp;(R<sub>series</sub>+R<sub>pot</sub>)] at the current Vol position (resistive, mid-band; the bright cap modifies it at HF on the Bode chart).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> how much of V1A's output reaches V1B's grid.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> this is what the Vol slider does &mdash; it decides <em>where</em> the chain distorts. Low Vol: V1A's character only, V1B clean. High Vol: V1B gets slammed (watch its Block meter and clip readouts light up). A permanent Series&nbsp;R builds in attenuation for a cleaner-by-design second stage.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Source Z <span class="glossary-tag">wiper Thevenin impedance &middot; k&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> (R<sub>series</sub>+R<sub>pot_top</sub>)&nbsp;&#8741;&nbsp;R<sub>pot_bot</sub> &mdash; zero at Vol&nbsp;0, R<sub>series</sub> at full, peaking near mid-rotation (&asymp;250&nbsp;k&Omega; on a 1&nbsp;M pot).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the impedance feeding V1B's grid. With V1B's Miller capacitance it forms the dominant HF rolloff, and it sits in the blocking charge path (higher Z = gentler grid conduction).</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> the classic "amp goes dull at half volume" lives here &mdash; the mid-rotation impedance peak against Miller capacitance. Cure it with a bright cap across the pot's top half (watch the V1B Bode chart lift), or use a smaller pot value for less peak at the cost of V1A gain.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">V1A Rload <span class="glossary-tag">interstage total resistance &middot; &Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> R<sub>series</sub>&nbsp;+&nbsp;R<sub>pot</sub> &mdash; the wiper position doesn't change it (the wiper is unloaded at audio).</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> V1A's AC load: sets its gain via R<sub>a</sub>&nbsp;=&nbsp;R<sub>p</sub>&nbsp;&#8741;&nbsp;R<sub>load</sub> and its clip ceilings, and scales the blocking recovery &tau;.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> swap the 1&nbsp;M pot for 250&nbsp;k and V1A loses a touch of gain and swing &mdash; subtly cleaner and faster-recovering from blocking; keep 1&nbsp;M for maximum gain. Watch V1A's Gain and Max&nbsp;in readouts move as you change the pot value.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">V1B grid leak <span class="glossary-tag">DC grid return &middot; k&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> R<sub>pot_bot</sub>&nbsp;=&nbsp;R<sub>pot</sub>&nbsp;&times;&nbsp;Vol fraction &mdash; the wiper-to-ground section of the interstage pot.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> V1B's DC grid reference and part of the coupling high-pass / blocking discharge path. At Vol&nbsp;0 the grid is grounded and the stage is silent.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> mostly indirect &mdash; it rides with Vol, so the HP corner and blocking recovery drift slightly across the pot's travel, exactly like a real one-pot interstage. A design with a fixed 1&nbsp;M grid leak after the pot would pin those corners regardless of volume.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Master atten <span class="glossary-tag">output divider &middot; dB</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> same divider math as Attenuation, applied to the output network at the current Master position.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> output level <em>after</em> all the distortion has been generated &mdash; purely resistive here, so it scales amplitude without changing tone.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> the master-volume principle: set Input and Vol for the distortion voicing you want, then use Master purely for loudness. (In a full amp a low master also means less power-amp contribution &mdash; that part isn't modeled here.)</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">V1B Rload <span class="glossary-tag">output-network total resistance &middot; &Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> output-network R<sub>series</sub>&nbsp;+&nbsp;R<sub>pot</sub> &mdash; V1B's AC load, independent of the Master position.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the same gain/ceiling lever for V1B that V1A&nbsp;Rload is for V1A.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> a smaller master pot (1&nbsp;M&nbsp;&rarr;&nbsp;250&nbsp;k) trims V1B's gain and headroom &mdash; verify on the Gain readout. Use the output Series&nbsp;R to mimic the input impedance of whatever real stage follows, and the tool's clip readouts will reflect that loading.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Output Z <span class="glossary-tag">looking back at the output node &middot; k&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> (R<sub>series_out</sub>&nbsp;+&nbsp;R<sub>pot_top</sub>&nbsp;+&nbsp;Z<sub>out&nbsp;V1B</sub>)&nbsp;&#8741;&nbsp;R<sub>pot_bot</sub> at the master wiper &mdash; zero at Master&nbsp;0, peaking near mid-rotation.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the source impedance presented to anything connected downstream &mdash; distinct from the per-stage Output&nbsp;Z cards (this one includes the whole output network).</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> the interface number. Driving long cables or a pedal input from &gt;100&nbsp;k&Omega; here shaves treble (cable capacitance against this Z). Fixes: run Master high, use a smaller master pot, or plan a cathode-follower/buffer after this node.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Blocking charge &tau; <span class="glossary-tag">choke onset speed &middot; ms</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> C<sub>out&nbsp;V1A</sub>&nbsp;&times;&nbsp;[(R<sub>series</sub>+R<sub>pot_top</sub>) + (R<sub>g2</sub>+1&nbsp;k)&nbsp;&#8741;&nbsp;R<sub>pot_bot</sub>] at the current wiper.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> how quickly blocking charge builds while V1B's grid conducts &mdash; the <em>attack</em> of the choke.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> a bigger V1B grid stopper or interstage Series&nbsp;R slows the charge &mdash; gentler choke onset when the stage is slammed. A smaller coupling cap shortens it, but also shortens recovery, which is usually the better trade (see Blocking recovery &tau;).</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Blocking recovery &tau; <span class="glossary-tag">choke release time &middot; ms</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> C<sub>out&nbsp;V1A</sub>&nbsp;&times;&nbsp;(R<sub>series</sub>&nbsp;+&nbsp;R<sub>pot</sub>&nbsp;+&nbsp;Z<sub>out&nbsp;V1A</sub>) &mdash; the same number as V1B's Block&nbsp;rec card.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> drain time of the accumulated blocking charge &mdash; how long the post-transient duck lasts.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> interstage cap size first, network resistance second. Roughly: &le;5&nbsp;ms reads as tight modern high-gain; 20&ndash;50&nbsp;ms is vintage-style looseness that "breathes" after big chords. Set the cap by where you want the low-end corner, then check this number tells the same story.</p>
         </div>
 
       </div>
