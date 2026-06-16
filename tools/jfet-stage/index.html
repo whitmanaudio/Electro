@@ -1,0 +1,2091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>JFET Stage Designer — Electo</title>
+<link rel="stylesheet" href="../../shared.css">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   JFET stage designer — sibling of the 12AX7 preamp tool.
+
+   Two JFET stages in cascade (J1 → interstage network → J2 → output network),
+   each independently configurable as a common-source voltage amp or a
+   source-follower buffer. Physics: Shockley square law for the device, with
+   the cathode→source / plate→drain / grid→gate correspondence that makes the
+   preamp's whole analysis engine port directly.
+
+   Layout mirrors the preamp:
+     ① Header  ② Inputs strip (J1 | Network | J2)  ③ Transport bar (sticky)
+     ④ Headline readouts  ⑤ Report area (freq / waves / drain curves / cards /
+       glossary), checkbox-toggled, persisted to localStorage.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app{padding:1.25rem 2rem;max-width:1440px;margin:0 auto}
+
+/* ── ② Inputs strip ────────────────────────────────────────────────────── */
+.inputs-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;align-items:start;margin-bottom:1rem}
+.stage-card{background:var(--color-bg);border:1px solid var(--color-border-light);border-radius:var(--radius-lg);padding:.9rem 1.1rem;box-shadow:var(--shadow-card);min-width:0}
+.stage-card .stage-label{font-size:13px;font-weight:700;color:var(--color-text);letter-spacing:.02em;margin-bottom:.5rem;display:inline-flex;align-items:center;gap:8px}
+.stage-card .stage-label::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--color-accent)}
+.stage-card .sec-title{margin-bottom:.7rem;display:block}
+.dev-select-row{display:flex;align-items:center;gap:8px;margin-bottom:.7rem}
+.dev-select-row .field-label{margin-bottom:0;white-space:nowrap}
+.tube-select{flex:1;min-width:0;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg);font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--color-text);padding:7px 10px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.tube-select:hover{border-color:var(--color-accent)}
+.tube-select:focus{outline:none;border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-focus)}
+.config-row{display:flex;align-items:center;gap:8px;margin-bottom:.8rem;padding-bottom:.8rem;border-bottom:1px solid var(--color-border-light)}
+.config-row .field-label{margin-bottom:0;white-space:nowrap}
+.fields-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.fields-grid .field{min-width:0;margin-bottom:10px}
+.fields-grid .field:last-child{margin-bottom:0}
+.fields-grid .input-group{min-width:0}
+.field.span2{grid-column:1/-1}
+/* DCA75 measured-value fields get a subtle accent so it's clear they accept
+   real measurements that override the device defaults. */
+.meas .input-group{border-color:var(--color-accent)}
+.meas .field-label{color:var(--color-accent)}
+.stage-card-foot{margin-top:.7rem}
+.readonly-val{background:var(--color-bg-secondary);border:1px solid var(--color-border-light);border-radius:var(--radius-md);padding:7px 12px;font-size:12.5px;font-family:var(--font-mono);color:var(--color-text-secondary)}
+.readonly-label{font-size:11px;color:var(--color-text-tertiary);margin-top:3px}
+.dca-note{font-size:11px;color:var(--color-text-tertiary);margin:-.2rem 0 .7rem;line-height:1.4}
+/* gfs cross-check line under the gfs field — compares the measured forward
+   transconductance against the square-law model's gm0. min-height holds the
+   layout steady when it's empty. */
+.dca-cross{font-size:10.5px;margin-top:4px;line-height:1.3;color:var(--color-text-tertiary);font-family:var(--font-mono);min-height:13px}
+.dca-cross.ok{color:var(--color-accent)}
+.dca-cross.warn{color:#c0392b}
+
+/* ── ③ Transport bar (sticky) ──────────────────────────────────────────── */
+.transport-bar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:1rem;padding:.55rem .9rem;background:var(--color-bg-secondary);border:1px solid var(--color-border-light);border-radius:var(--radius-md);margin-bottom:1rem;transition:box-shadow .15s,background .15s}
+.transport-bar.is-stuck{box-shadow:0 2px 10px rgba(17,22,31,.08);background:var(--color-bg)}
+.tb-group{display:flex;align-items:center;gap:8px;flex:1 1 0;min-width:0}
+.tb-label{font-size:11px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;min-width:38px}
+.tb-group input[type=range]{flex:1;min-width:70px;accent-color:var(--color-accent)}
+.tb-val{font-size:12.5px;font-family:var(--font-mono);font-weight:600;color:var(--color-text);min-width:64px;text-align:right;white-space:nowrap}
+.tb-readout{display:flex;align-items:baseline;gap:5px;padding-left:1rem;border-left:1px solid var(--color-border-light);white-space:nowrap;flex:0 0 auto}
+.tb-readout-label{font-size:11px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em}
+.tb-readout-value{font-size:16px;font-family:var(--font-mono);font-weight:600;color:var(--color-accent);display:inline-block;min-width:5ch;text-align:right}
+.tb-readout-z{font-size:13px;min-width:9ch;color:var(--color-text)}
+.tb-readout-unit{font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
+
+.blk-meter{position:relative;display:inline-block;width:64px;height:9px;background:var(--color-bg-secondary);border:1px solid var(--color-border-light);border-radius:999px;overflow:hidden;vertical-align:middle}
+.blk-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--color-accent);border-radius:999px;transition:width .12s,background .12s}
+.blk-fill.warn{background:#d4940a}
+.blk-fill.hot{background:#c0392b}
+.blk-tick{position:absolute;left:50%;top:-1px;bottom:-1px;width:1.5px;background:var(--color-text-tertiary);opacity:.55}
+.blk-val{min-width:52px;text-align:right}
+.blk-val.hot{color:#c0392b}
+
+/* ── ④ Headline readouts ───────────────────────────────────────────────── */
+.headline-readouts{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:1.1rem}
+.hr-stage{background:var(--color-bg);border:1px solid var(--color-border-light);border-radius:var(--radius-md);padding:.55rem .9rem;box-shadow:var(--shadow-card);display:flex;flex-wrap:wrap;align-items:baseline;gap:.5rem 1rem}
+.hr-stage-label{font-size:11px;font-weight:700;color:var(--color-accent);letter-spacing:.05em;text-transform:uppercase}
+.hr-config{font-size:10px;font-weight:600;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em;background:var(--color-bg-secondary);border:1px solid var(--color-border-light);border-radius:4px;padding:1px 6px}
+.hr-item{display:inline-flex;align-items:baseline;gap:4px;font-size:12.5px}
+.hr-label{color:var(--color-text-secondary);font-weight:500}
+.hr-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text);font-size:14px}
+.hr-value.accent{color:var(--color-accent)}
+.hr-unit{color:var(--color-text-tertiary);font-size:11px;font-family:var(--font-mono)}
+
+/* ── ⑤ Report area ─────────────────────────────────────────────────────── */
+.report-area{margin-top:.5rem}
+.report-controls{display:flex;flex-wrap:wrap;align-items:center;gap:1rem;padding:.5rem .9rem;background:var(--color-bg-secondary);border:1px solid var(--color-border-light);border-radius:var(--radius-md);margin-bottom:1rem}
+.report-controls-label{font-size:11px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em;margin-right:.5rem}
+.report-toggle{display:inline-flex;align-items:center;gap:6px;color:var(--color-text-secondary);cursor:pointer;font-size:12.5px;user-select:none;font-family:var(--font-sans)}
+.report-toggle:has(input:checked){color:var(--color-text);font-weight:500}
+.report-toggle input{accent-color:var(--color-accent);cursor:pointer}
+
+.report-section{background:var(--color-bg);border:1px solid var(--color-border-light);border-radius:var(--radius-lg);padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:var(--shadow-card)}
+.report-section[hidden]{display:none}
+.report-section > .sec-title{margin-bottom:.7rem;display:block}
+
+.glossary-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem 1.5rem}
+.glossary-group-title{grid-column:1/-1;font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.09em;font-weight:600;margin-bottom:-.25rem}
+.glossary-group-title:not(:first-child){margin-top:.5rem}
+.glossary-entry{padding:.65rem .8rem;background:var(--color-bg-secondary);border-radius:var(--radius-md)}
+.glossary-term{font-size:14px;font-weight:700;color:var(--color-text);font-family:var(--font-mono);margin-bottom:.35rem}
+.glossary-tag{font-size:11px;font-weight:500;color:var(--color-text-tertiary);font-family:var(--font-sans);margin-left:6px;letter-spacing:.02em}
+.glossary-how,.glossary-what,.glossary-sonic{font-size:12.5px;color:var(--color-text-secondary);line-height:1.55;margin:0 0 .35rem}
+.glossary-sonic{margin-bottom:0;padding-top:.3rem;border-top:1px dashed var(--color-border-light)}
+.glossary-sonic strong{color:var(--color-accent)}
+.glossary-how strong,.glossary-what strong{color:var(--color-text);font-weight:600}
+.glossary-how sub,.glossary-what sub,.glossary-sonic sub{font-size:.75em}
+.report-row{display:grid;gap:1rem}
+.report-row.two-col{grid-template-columns:1fr 1fr}
+.report-row.three-col{grid-template-columns:1fr minmax(175px,215px) 1fr}
+.report-sub-net{min-width:0;padding-top:1px}
+.report-sub{min-width:0}
+.report-sub-title{font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.09em;font-weight:600;margin-bottom:.5rem;display:block}
+
+.chart-canvas{width:100%;display:block;border-radius:var(--radius-md);background:var(--color-bg-chart);height:260px}
+.combined-chart{height:320px}
+.wave-canvas{height:360px}
+
+.result-grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.result-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.freq-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 4px 0;font-size:11px;font-family:var(--font-mono);color:var(--color-text-secondary)}
+.freq-legend .leg-item{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.freq-legend .leg-line{width:18px;height:0;border-top:2.5px solid;flex-shrink:0}
+.freq-legend .leg-line.dashed{border-top-style:dashed}
+.freq-legend .leg-fc{font-weight:600;color:var(--color-text)}
+
+.net-derived{font-size:12.5px;color:var(--color-text-secondary);line-height:1.8;font-family:var(--font-mono)}
+.net-derived strong{color:var(--color-text);font-weight:600;font-family:var(--font-sans)}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width:1100px){
+  .inputs-strip{grid-template-columns:1fr 1fr}
+  .inputs-strip > .stage-card.network-card{grid-column:1/-1;order:99}
+  .headline-readouts{grid-template-columns:1fr}
+  .report-row.three-col{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  .app{padding:1rem}
+  .inputs-strip{grid-template-columns:1fr}
+  .inputs-strip > .stage-card.network-card{order:initial}
+  .fields-grid{grid-template-columns:1fr 1fr}
+  .transport-bar{flex-direction:column;align-items:stretch}
+  .tb-group, .tb-readout{width:100%;border-left:none;padding-left:0}
+  .report-row.two-col{grid-template-columns:1fr}
+  .glossary-grid{grid-template-columns:1fr}
+  .result-grid-3{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <a href="../../index.html" class="back-link">&larr; All tools</a>
+
+  <div class="header" style="margin-top:.6rem">
+    <span class="header-title">JFET stage</span>
+    <span class="badge">J201 / 2N5457</span>
+  </div>
+
+  <!-- ② INPUTS STRIP — J1 | Network | J2 -->
+  <div class="inputs-strip">
+
+    <!-- ───────────────────────── J1 ───────────────────────── -->
+    <div class="stage-card j1-card">
+      <span class="stage-label">J1</span>
+      <div class="dev-select-row">
+        <label class="field-label" for="in-dev">Device</label>
+        <select id="in-dev" class="tube-select" onchange="onDeviceChange('')"></select>
+      </div>
+      <div class="config-row">
+        <label class="field-label" for="in-config">Config</label>
+        <select id="in-config" class="tube-select" onchange="onConfigChange('')">
+          <option value="cs" selected>Common source &middot; voltage amp</option>
+          <option value="sf">Source follower &middot; buffer</option>
+        </select>
+      </div>
+      <span class="sec-title">Measured &middot; from DCA75</span>
+      <div class="dca-note">Device sets typical values; overwrite IDSS / V<sub>P</sub> (and optionally r<sub>d</sub>) with your DCA75 readings for the actual part.</div>
+      <div class="fields-grid">
+        <div class="field meas">
+          <label class="field-label">IDSS</label>
+          <div class="input-group">
+            <input type="number" id="in-idss" value="0.6" min="0" step="any" oninput="recalc()">
+            <span class="unit-static">mA</span>
+          </div>
+        </div>
+        <div class="field meas">
+          <label class="field-label">V<sub>P</sub> (V<sub>GS</sub>off)</label>
+          <div class="input-group">
+            <input type="number" id="in-vp" value="-0.7" max="0" step="any" oninput="recalc()">
+            <span class="unit-static">V</span>
+          </div>
+        </div>
+        <div class="field meas">
+          <label class="field-label" for="in-gfs">g<sub>fs</sub> <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-gfs" min="0" step="any" oninput="recalc()" placeholder="—">
+            <span class="unit-static">mA/V</span>
+          </div>
+          <div class="dca-cross" id="gfs-note"></div>
+        </div>
+        <div class="field meas">
+          <label class="field-label" for="in-rdovr">r<sub>d</sub> <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-rdovr" min="0" step="any" oninput="recalc()" placeholder="auto">
+            <select class="unit-select" id="in-rdovr-u" onchange="recalc()">
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field span2">
+          <label class="field-label" for="in-vcc">V+ Supply</label>
+          <div class="input-group">
+            <input type="number" id="in-vcc" value="9" min="0" max="60" step="any" oninput="recalc()">
+            <span class="unit-static">V</span>
+          </div>
+        </div>
+      </div>
+      <span class="sec-title" style="margin-top:1rem">Values</span>
+      <div class="fields-grid">
+        <div class="field" id="fld-rd">
+          <label class="field-label">Drain R (Rd)</label>
+          <div class="input-group">
+            <input type="number" id="in-rd" value="10" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rd-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Source R (Rs)</label>
+          <div class="input-group">
+            <input type="number" id="in-rs" value="1" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rs-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" id="fld-cs">
+          <label class="field-label" for="in-cs">Source bypass (Cs) <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-cs" min="0" step="any" oninput="recalc()" placeholder="—">
+            <select class="unit-select" id="in-cs-u" onchange="recalc()">
+              <option value="1e-9">nF</option>
+              <option value="1e-6" selected>&micro;F</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Output Cap (Cout)</label>
+          <div class="input-group">
+            <input type="number" id="in-cout" value="100" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-cout-u" onchange="recalc()">
+              <option value="1e-12">pF</option>
+              <option value="1e-9" selected>nF</option>
+              <option value="1e-6">&micro;F</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Gate Stopper (Rg)</label>
+          <div class="input-group">
+            <input type="number" id="in-rg" value="1" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rg-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Gate R (Rgate)</label>
+          <div class="input-group">
+            <input type="number" id="in-rgate" value="1" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rgate-u" onchange="recalc()">
+              <option value="1e3">k&Omega;</option>
+              <option value="1e6" selected>M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field span2">
+          <label class="field-label" for="in-cin">Input Cap (Cin) <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-cin" min="0" step="any" oninput="recalc()" placeholder="—">
+            <select class="unit-select" id="in-cin-u" onchange="recalc()">
+              <option value="1e-12">pF</option>
+              <option value="1e-9" selected>nF</option>
+              <option value="1e-6">&micro;F</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="stage-card-foot">
+        <div class="readonly-val" id="j1-rload-display">Rload: —</div>
+        <div class="readonly-label">from network (Rseries + Rpot)</div>
+      </div>
+    </div>
+
+    <!-- ───────────────────────── Network ───────────────────────── -->
+    <div class="stage-card network-card">
+      <span class="stage-label">Network</span>
+      <span class="sec-title">Interstage</span>
+      <div class="fields-grid">
+        <div class="field">
+          <label class="field-label">Series R</label>
+          <div class="input-group">
+            <input type="number" id="in-rseries" value="0" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rseries-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Pot Value</label>
+          <div class="input-group">
+            <input type="number" id="in-rpot" value="500" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rpot-u" onchange="recalc()">
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field span2">
+          <label class="field-label" for="in-cbright">Bright Cap <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-cbright" min="0" step="any" oninput="recalc()" placeholder="—">
+            <select class="unit-select" id="in-cbright-u" onchange="recalc()">
+              <option value="1e-12" selected>pF</option>
+              <option value="1e-9">nF</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <span class="sec-title" style="margin-top:1rem">Output &middot; master volume</span>
+      <div class="fields-grid">
+        <div class="field">
+          <label class="field-label">Series R</label>
+          <div class="input-group">
+            <input type="number" id="in-rseries-out" value="0" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rseries-out-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Pot Value</label>
+          <div class="input-group">
+            <input type="number" id="in-rpot-out" value="100" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rpot-out-u" onchange="recalc()">
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="stage-card-foot">
+        <div class="readonly-val" id="net-out-zhint">Output Z: —</div>
+        <div class="readonly-label">looking back into the master wiper</div>
+      </div>
+    </div>
+
+    <!-- ───────────────────────── J2 ───────────────────────── -->
+    <div class="stage-card j2-card">
+      <span class="stage-label">J2</span>
+      <div class="dev-select-row">
+        <label class="field-label" for="in-dev2">Device</label>
+        <select id="in-dev2" class="tube-select" onchange="onDeviceChange('2')"></select>
+      </div>
+      <div class="config-row">
+        <label class="field-label" for="in-config2">Config</label>
+        <select id="in-config2" class="tube-select" onchange="onConfigChange('2')">
+          <option value="cs" selected>Common source &middot; voltage amp</option>
+          <option value="sf">Source follower &middot; buffer</option>
+        </select>
+      </div>
+      <span class="sec-title">Measured &middot; from DCA75</span>
+      <div class="dca-note">Device sets typical values; overwrite IDSS / V<sub>P</sub> (and optionally r<sub>d</sub>) with your DCA75 readings for the actual part.</div>
+      <div class="fields-grid">
+        <div class="field meas">
+          <label class="field-label">IDSS</label>
+          <div class="input-group">
+            <input type="number" id="in-idss2" value="0.6" min="0" step="any" oninput="recalc()">
+            <span class="unit-static">mA</span>
+          </div>
+        </div>
+        <div class="field meas">
+          <label class="field-label">V<sub>P</sub> (V<sub>GS</sub>off)</label>
+          <div class="input-group">
+            <input type="number" id="in-vp2" value="-0.7" max="0" step="any" oninput="recalc()">
+            <span class="unit-static">V</span>
+          </div>
+        </div>
+        <div class="field meas">
+          <label class="field-label" for="in-gfs2">g<sub>fs</sub> <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-gfs2" min="0" step="any" oninput="recalc()" placeholder="—">
+            <span class="unit-static">mA/V</span>
+          </div>
+          <div class="dca-cross" id="gfs-note2"></div>
+        </div>
+        <div class="field meas">
+          <label class="field-label" for="in-rdovr2">r<sub>d</sub> <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-rdovr2" min="0" step="any" oninput="recalc()" placeholder="auto">
+            <select class="unit-select" id="in-rdovr2-u" onchange="recalc()">
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field span2">
+          <label class="field-label">V+ Supply</label>
+          <div class="readonly-val" id="j2-vcc-display">9 V</div>
+          <div class="readonly-label">shared with J1</div>
+        </div>
+      </div>
+      <span class="sec-title" style="margin-top:1rem">Values</span>
+      <div class="fields-grid">
+        <div class="field" id="fld-rd2">
+          <label class="field-label">Drain R (Rd2)</label>
+          <div class="input-group">
+            <input type="number" id="in-rd2" value="10" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rd2-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+              <option value="1e6">M&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Source R (Rs2)</label>
+          <div class="input-group">
+            <input type="number" id="in-rs2" value="1" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rs2-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" id="fld-cs2">
+          <label class="field-label" for="in-cs2">Source bypass (Cs2) <span class="opt">optional</span></label>
+          <div class="input-group">
+            <input type="number" id="in-cs2" min="0" step="any" oninput="recalc()" placeholder="—">
+            <select class="unit-select" id="in-cs2-u" onchange="recalc()">
+              <option value="1e-9">nF</option>
+              <option value="1e-6" selected>&micro;F</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Output Cap (Cout2)</label>
+          <div class="input-group">
+            <input type="number" id="in-cout2" value="100" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-cout2-u" onchange="recalc()">
+              <option value="1e-12">pF</option>
+              <option value="1e-9" selected>nF</option>
+              <option value="1e-6">&micro;F</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Gate Stopper (Rg2)</label>
+          <div class="input-group">
+            <input type="number" id="in-rg2" value="1" min="0" step="any" oninput="recalc()">
+            <select class="unit-select" id="in-rg2-u" onchange="recalc()">
+              <option value="1">&Omega;</option>
+              <option value="1e3" selected>k&Omega;</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Load R (Rload2)</label>
+          <div class="readonly-val" id="j2-rload-display">&mdash;</div>
+          <div class="readonly-label">from output network</div>
+        </div>
+      </div>
+      <div class="stage-card-foot">
+        <div class="readonly-val" id="j2-rgl-display">Gate return: —</div>
+        <div class="readonly-label">from pot wiper to ground</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ③ TRANSPORT BAR -->
+  <div class="transport-bar" id="transport-bar" aria-live="polite">
+    <div class="tb-group">
+      <label class="tb-label" for="amp-slider">Input</label>
+      <input type="range" id="amp-slider" min="0.01" max="4" step="0.01" value="0.2" oninput="onAmpChange()">
+      <span class="tb-val" id="amp-val">0.20 Vpp</span>
+    </div>
+    <div class="tb-group">
+      <label class="tb-label" for="freq-slider">Tone</label>
+      <!-- log10(Hz): 1.30103 = 20 Hz, 4.30103 = 20 kHz, 3.0 = 1 kHz. -->
+      <input type="range" id="freq-slider" min="1.30103" max="4.30103" step="0.01" value="3.0" oninput="onFreqChange()">
+      <span class="tb-val" id="freq-val">1.00 kHz</span>
+    </div>
+    <div class="tb-group">
+      <label class="tb-label" for="pot-slider">Vol</label>
+      <input type="range" id="pot-slider" min="0" max="10" step="0.1" value="5" oninput="onPotChange()">
+      <span class="tb-val" id="pot-display">5</span>
+    </div>
+    <div class="tb-group">
+      <label class="tb-label" for="master-slider">Master</label>
+      <input type="range" id="master-slider" min="0" max="10" step="0.1" value="10" oninput="onMasterChange()">
+      <span class="tb-val" id="master-display">10</span>
+    </div>
+    <div class="tb-readout">
+      <span class="tb-readout-label">Output</span>
+      <span class="tb-readout-value" id="combined-vpp">&mdash;</span>
+      <span class="tb-readout-unit">Vpp</span>
+      <span class="tb-readout-label" style="margin-left:.7rem">Z</span>
+      <span class="tb-readout-value tb-readout-z" id="out-z">&mdash;</span>
+    </div>
+  </div>
+
+  <!-- ④ HEADLINE READOUTS -->
+  <div class="headline-readouts">
+    <div class="hr-stage">
+      <span class="hr-stage-label">J1</span>
+      <span class="hr-config" id="cfg-badge">CS</span>
+      <span class="hr-item"><span class="hr-label">Gain</span><span class="hr-value accent" id="out-gain">&mdash;</span><span class="hr-unit" id="out-gain-db"></span></span>
+      <span class="hr-item"><span class="hr-label" id="out-vd-lbl">Vd</span><span class="hr-value" id="out-vd">&mdash;</span><span class="hr-unit">V</span></span>
+      <span class="hr-item"><span class="hr-label">Vgs</span><span class="hr-value" id="out-vgs">&mdash;</span><span class="hr-unit">V</span></span>
+      <span class="hr-item"><span class="hr-label">Id</span><span class="hr-value" id="out-id">&mdash;</span><span class="hr-unit">mA</span></span>
+      <span class="hr-item" title="Largest input signal this stage handles before its output starts to clip"><span class="hr-label">Max in</span><span class="hr-value" id="out-maxin">&mdash;</span><span class="hr-unit">Vpp</span></span>
+      <span class="hr-item" title="Blocking-distortion meter. Fill to the tick = approaching gate-conduction onset (label shows proximity %); past the tick = blocking, label shows the gate-bias displacement in volts. A DC-coupled stage (no input cap) cannot block and shows —.">
+        <span class="hr-label">Block</span>
+        <span class="blk-meter"><span class="blk-fill" id="blk-fill"></span><span class="blk-tick"></span></span>
+        <span class="hr-value blk-val" id="blk-val">&mdash;</span>
+      </span>
+    </div>
+    <div class="hr-stage">
+      <span class="hr-stage-label">J2</span>
+      <span class="hr-config" id="cfg-badge2">CS</span>
+      <span class="hr-item"><span class="hr-label">Gain</span><span class="hr-value accent" id="out-gain2">&mdash;</span><span class="hr-unit" id="out-gain-db2"></span></span>
+      <span class="hr-item"><span class="hr-label" id="out-vd-lbl2">Vd</span><span class="hr-value" id="out-vd2">&mdash;</span><span class="hr-unit">V</span></span>
+      <span class="hr-item"><span class="hr-label">Vgs</span><span class="hr-value" id="out-vgs2">&mdash;</span><span class="hr-unit">V</span></span>
+      <span class="hr-item"><span class="hr-label">Id</span><span class="hr-value" id="out-id2">&mdash;</span><span class="hr-unit">mA</span></span>
+      <span class="hr-item" title="Largest input signal this stage handles before its output starts to clip"><span class="hr-label">Max in</span><span class="hr-value" id="out-maxin2">&mdash;</span><span class="hr-unit">Vpp</span></span>
+      <span class="hr-item" title="Blocking-distortion meter driven by gate conduction through the interstage coupling cap.">
+        <span class="hr-label">Block</span>
+        <span class="blk-meter"><span class="blk-fill" id="blk-fill2"></span><span class="blk-tick"></span></span>
+        <span class="hr-value blk-val" id="blk-val2">&mdash;</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- ⑤ REPORT AREA -->
+  <section class="report-area">
+    <div class="report-controls">
+      <span class="report-controls-label">Show in report:</span>
+      <label class="report-toggle"><input type="checkbox" data-report="freq"> Frequency response</label>
+      <label class="report-toggle"><input type="checkbox" data-report="waves"> Waveforms</label>
+      <label class="report-toggle"><input type="checkbox" data-report="curves"> Drain curves</label>
+      <label class="report-toggle"><input type="checkbox" data-report="cards"> Full result cards</label>
+      <label class="report-toggle"><input type="checkbox" data-report="glossary"> Glossary</label>
+    </div>
+
+    <div class="report-section" data-report="freq">
+      <span class="sec-title">Combined frequency response &nbsp;&middot;&nbsp; J1 &rarr; Network &rarr; J2</span>
+      <canvas id="chart-freq-combined" class="chart-canvas combined-chart" role="img"
+        aria-label="Combined frequency response of the full JFET signal chain."></canvas>
+      <p class="sr-only" id="combined-summary">Combined response chart has no data yet.</p>
+      <div class="report-row two-col" style="margin-top:1rem">
+        <div class="report-sub">
+          <span class="report-sub-title">J1 frequency response</span>
+          <canvas id="chart-freq-j1" class="chart-canvas" role="img"
+            aria-label="J1 Bode magnitude plot with individual component corners and composite response."></canvas>
+          <div id="freq-legend-j1" class="freq-legend"></div>
+        </div>
+        <div class="report-sub">
+          <span class="report-sub-title">J2 frequency response &nbsp;&middot;&nbsp; with network</span>
+          <canvas id="chart-freq-j2" class="chart-canvas" role="img"
+            aria-label="J2 Bode magnitude plot with the interstage network cascaded in."></canvas>
+          <div id="freq-legend-j2" class="freq-legend"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" data-report="waves">
+      <span class="sec-title">Waveforms</span>
+      <div class="report-row two-col">
+        <div class="report-sub">
+          <span class="report-sub-title">J1 waveform</span>
+          <canvas id="chart-wave-j1" class="chart-canvas wave-canvas" role="img"
+            aria-label="J1 time-domain output waveform with clip-reference lines."></canvas>
+        </div>
+        <div class="report-sub">
+          <span class="report-sub-title">J2 waveform</span>
+          <canvas id="chart-wave-j2" class="chart-canvas wave-canvas" role="img"
+            aria-label="J2 time-domain output waveform driven by J1 through the interstage network."></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" data-report="curves">
+      <span class="sec-title">Drain characteristics</span>
+      <div class="report-row two-col">
+        <div class="report-sub">
+          <span class="report-sub-title">J1</span>
+          <canvas id="chart-curve-j1" class="chart-canvas" role="img"
+            aria-label="J1 drain characteristic curves (Id vs. Vds) with DC and AC load lines and operating point."></canvas>
+          <div id="curve-legend-j1" class="freq-legend"></div>
+        </div>
+        <div class="report-sub">
+          <span class="report-sub-title">J2</span>
+          <canvas id="chart-curve-j2" class="chart-canvas" role="img"
+            aria-label="J2 drain characteristic curves (Id vs. Vds) with DC and AC load lines and operating point."></canvas>
+          <div id="curve-legend-j2" class="freq-legend"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" data-report="cards">
+      <span class="sec-title">Full result cards</span>
+      <div class="report-row three-col">
+        <div class="report-sub">
+          <span class="report-sub-title">J1</span>
+          <div class="result-grid-3">
+            <div class="result-card"><div class="result-label">gm</div><div class="result-value" id="out-gm">&mdash;</div><div class="result-unit">mA/V</div></div>
+            <div class="result-card"><div class="result-label">rd</div><div class="result-value" id="out-rd">&mdash;</div><div class="result-unit" id="out-rd-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Input Z</div><div class="result-value" id="out-zin">&mdash;</div><div class="result-unit" id="out-zin-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Output Z</div><div class="result-value" id="out-zout">&mdash;</div><div class="result-unit" id="out-zout-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Output</div><div class="result-value" id="out-swing">&mdash;</div><div class="result-unit">Vpp</div></div>
+            <div class="result-card" title="Power-law exponent of the channel transfer, referenced to cutoff. ~2.0 = square law (bypassed, 2nd-harmonic heavy); ~1.5 = the triode three-halves law the Fetzer Valve targets via an unbypassed source resistor."><div class="result-label">Harmonic law</div><div class="result-value" id="out-nlaw">&mdash;</div><div class="result-unit">exp</div></div>
+            <div class="result-card"><div class="result-label">Gate shift</div><div class="result-value" id="out-grid-shift">&mdash;</div><div class="result-unit">V</div></div>
+            <div class="result-card"><div class="result-label">Bias excursion</div><div class="result-value" id="out-bias-exc">&mdash;</div><div class="result-unit">V</div></div>
+            <div class="result-card" title="Blocking recovery time constant of this stage's input coupling cap"><div class="result-label">Block rec</div><div class="result-value" id="out-blkrec">&mdash;</div><div class="result-unit">ms</div></div>
+          </div>
+        </div>
+        <div class="report-sub report-sub-net">
+          <span class="report-sub-title">Network</span>
+          <div class="net-derived" id="net-derived">
+            <strong>Attenuation:</strong> <span id="net-atten">—</span><br>
+            <strong>Source Z:</strong> <span id="net-srcz">—</span><br>
+            <strong>J1 Rload:</strong> <span id="net-rload">—</span><br>
+            <strong>J2 gate return:</strong> <span id="net-rgl">—</span><br>
+            <strong>Master atten:</strong> <span id="net-matten">—</span><br>
+            <strong>J2 Rload:</strong> <span id="net-outrload">—</span><br>
+            <strong>Output Z:</strong> <span id="net-outz">—</span><br>
+            <strong>Blocking charge &tau;:</strong> <span id="net-blkchg">—</span><br>
+            <strong>Blocking recovery &tau;:</strong> <span id="net-blkrec">—</span>
+          </div>
+        </div>
+        <div class="report-sub">
+          <span class="report-sub-title">J2</span>
+          <div class="result-grid-3">
+            <div class="result-card"><div class="result-label">gm</div><div class="result-value" id="out-gm2">&mdash;</div><div class="result-unit">mA/V</div></div>
+            <div class="result-card"><div class="result-label">rd</div><div class="result-value" id="out-rd2">&mdash;</div><div class="result-unit" id="out-rd2-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Input Z</div><div class="result-value" id="out-zin2">&mdash;</div><div class="result-unit" id="out-zin2-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Output Z</div><div class="result-value" id="out-zout2">&mdash;</div><div class="result-unit" id="out-zout2-u">k&Omega;</div></div>
+            <div class="result-card"><div class="result-label">Output</div><div class="result-value" id="out-swing2">&mdash;</div><div class="result-unit">Vpp</div></div>
+            <div class="result-card" title="Power-law exponent of the channel transfer, referenced to cutoff (~2.0 square law / ~1.5 Fetzer three-halves)."><div class="result-label">Harmonic law</div><div class="result-value" id="out-nlaw2">&mdash;</div><div class="result-unit">exp</div></div>
+            <div class="result-card"><div class="result-label">Gate shift</div><div class="result-value" id="out-grid-shift2">&mdash;</div><div class="result-unit">V</div></div>
+            <div class="result-card"><div class="result-label">Bias excursion</div><div class="result-value" id="out-bias-exc2">&mdash;</div><div class="result-unit">V</div></div>
+            <div class="result-card" title="Blocking recovery time constant of the interstage coupling cap"><div class="result-label">Block rec</div><div class="result-value" id="out-blkrec2">&mdash;</div><div class="result-unit">ms</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section" data-report="glossary">
+      <span class="sec-title">Glossary &nbsp;&middot;&nbsp; JFET stage &amp; network</span>
+      <div class="glossary-grid">
+
+        <span class="glossary-group-title">Device &amp; bias</span>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">IDSS &amp; V<sub>P</sub> <span class="glossary-tag">device constants &middot; mA, V</span></div>
+          <p class="glossary-how"><strong>Source:</strong> the two numbers that define the Shockley square law I<sub>D</sub>&nbsp;=&nbsp;IDSS&middot;(1&minus;V<sub>GS</sub>/V<sub>P</sub>)&sup2;. Device pick seeds typical values; overwrite both with your DCA75 reading of the actual part.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> IDSS is the drain current at V<sub>GS</sub>=0; V<sub>P</sub> (pinch-off / V<sub>GS</sub>off, negative) is where the channel cuts off. Together they set bias, gm and the clean input window (&plusmn;|V<sub>P</sub>| ballpark).</p>
+          <p class="glossary-sonic"><strong>Why measure:</strong> JFET spreads are huge (J201 IDSS 0.2&ndash;1&nbsp;mA, V<sub>P</sub> &minus;0.3&ndash;&minus;1.5&nbsp;V). Two "J201s" can bias and clip very differently &mdash; matching/measuring is the difference between a design that works on paper and on the bench.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">gm <span class="glossary-tag">transconductance &middot; mA/V</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> central difference on the square-law model at the operating point, equal to g<sub>m0</sub>&middot;(1&minus;V<sub>GS</sub>/V<sub>P</sub>) with g<sub>m0</sub>=2&middot;IDSS/|V<sub>P</sub>|. Enter a DCA75 g<sub>fs</sub> to cross-check.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> drain current per volt of gate swing &mdash; the engine of gain (A<sub>v</sub>&nbsp;=&nbsp;&minus;gm&middot;R<sub>d</sub> bypassed). Falls as bias goes colder (toward V<sub>P</sub>).</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> hotter bias (bigger IDSS device, smaller R<sub>s</sub>) raises gm &mdash; more gain, earlier breakup. A low-V<sub>P</sub> part like the J201 gives high gm at tiny currents: the classic high-gain JFET front end.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">rd <span class="glossary-tag">drain resistance &middot; k&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> from each device's typical channel-length-modulation factor &lambda; as r<sub>d</sub>&nbsp;=&nbsp;1/(&lambda;&middot;I<sub>D</sub>) (&asymp;&nbsp;V<sub>A</sub>/I<sub>D</sub>, the Early voltage V<sub>A</sub>&nbsp;=&nbsp;1/&lambda;) &mdash; so it scales with bias current. <strong>Override:</strong> type a measured r<sub>d</sub> in the device panel and the tool back-calculates &lambda;&nbsp;=&nbsp;1/(r<sub>d</sub>&middot;I<sub>D</sub>) at the operating point, so r<sub>d</sub>, Z<sub>out</sub>, the gain ceiling, the drain-curve tilt and the time-domain sim all track your real part. Read it off a DCA75 curve trace as the saturation-region slope &Delta;V<sub>DS</sub>/&Delta;I<sub>D</sub> (or extrapolate the curve back to I<sub>D</sub>=0 for V<sub>A</sub>); leave it blank to use the typical &lambda;.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the JFET's internal AC drain resistance, sitting in parallel with R<sub>d</sub> at the output. With a small R<sub>d</sub> it trims gain only slightly, but it caps the gain a large R<sub>d</sub> can deliver (intrinsic limit gm&middot;r<sub>d</sub>) and sets the output-Z ceiling &mdash; so it matters most in high-R<sub>d</sub>, high-gain stages. A source follower is nearly r<sub>d</sub>-independent (Z<sub>out</sub>&nbsp;&asymp;&nbsp;1/gm), so the override barely moves its numbers.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> mostly a device trait &mdash; worth measuring when a high-gain stage's gain or output Z doesn't match the bench. Parts with high r<sub>d</sub> (low &lambda;) let big drain resistors actually deliver their gain; with low r<sub>d</sub>, doubling R<sub>d</sub> gives diminishing returns.</p>
+        </div>
+
+        <span class="glossary-group-title">Gain, impedance &amp; headroom</span>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Gain (A<sub>v</sub>) <span class="glossary-tag">mid-band &middot; &times; / dB</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> CS bypassed &mdash; &minus;gm&middot;(R<sub>d</sub>&nbsp;&#8741;&nbsp;r<sub>d</sub>&nbsp;&#8741;&nbsp;R<sub>load</sub>). CS unbypassed (Fetzer) &mdash; that, divided by (1+gm&middot;R<sub>s</sub>). Source follower &mdash; gm&middot;R<sub>s</sub>&prime;/(1+gm&middot;R<sub>s</sub>&prime;), always &lt;1.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the small-signal voltage gain actually applied to your input. Fetzer's rule of thumb: A<sub>v</sub>&nbsp;&asymp;&nbsp;0.5&middot;R<sub>d</sub>/R<sub>s</sub>&nbsp;&asymp;&nbsp;0.54&middot;(V+/|V<sub>P</sub>|&minus;2) &mdash; note it rides on V+ and V<sub>P</sub>, not IDSS.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> the source bypass cap is the big one (see Harmonic law). Raising V+ buys gain without shrinking the clean window; a smaller R<sub>s</sub>/bigger R<sub>d</sub> ratio pushes gain at the cost of headroom.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Input Z <span class="glossary-tag">mid-band &middot; k&Omega; / M&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> R<sub>g</sub> (gate stopper) + the gate return. J1: the gate resistor R<sub>gate</sub> to ground; J2: the interstage pot's wiper-to-ground section, so it moves with Vol.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the load this stage presents to its driver. The gate is essentially open at DC, so R<sub>gate</sub> sets it &mdash; JFETs make naturally high-Z inputs (great right after a guitar pickup). HF input Z falls with Miller capacitance (Bode chart).</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> bigger R<sub>gate</sub> (1&nbsp;M&nbsp;&rarr;&nbsp;2.2&nbsp;M) loads the pickup less &mdash; brighter, more open. Raise R<sub>g</sub> to drop the Miller corner for a darker, smoother top.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Output Z <span class="glossary-tag">mid-band &middot; k&Omega;</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> CS &mdash; R<sub>d</sub>&nbsp;&#8741;&nbsp;r<sub>d</sub> (unbypassed R<sub>s</sub> raises it via degeneration). Source follower &mdash; R<sub>s</sub>&nbsp;&#8741;&nbsp;(1/gm), typically a few hundred &Omega;.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the source impedance driving the next stage &mdash; sets the coupling-cap HP corner and how hard the next gate's conduction sags this stage.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> this is exactly why you'd set a stage to <em>source follower</em> &mdash; trade voltage gain for a low, stiff output that drives cables, tone stacks or the next pedal without treble loss. A CS stage's high R<sub>d</sub> is the opposite: lots of gain, but soft drive.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Harmonic law <span class="glossary-tag">power-law exponent</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> exponent of the channel transfer referenced to cutoff (fit at two drive levels, ~0.4&ndash;0.8&middot;|V<sub>P</sub>| above cutoff, re-solving the bias so degeneration counts). A bypassed source sits near 2.0; the Fetzer unbypassed R<sub>s</sub> pulls it toward 1.5.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the heart of the Fetzer Valve. A bare JFET is square-law (exponent 2.0, strong 2nd harmonic). Leaving R<sub>s</sub> <em>unbypassed</em> applies local feedback that bends the curve toward the triode's three-halves law (1.5) &mdash; the same harmonic recipe as a 12AX7.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> add a source bypass cap (C<sub>s</sub>) &rarr; exponent climbs toward 2.0, ~6&nbsp;dB more gain, fatter 2nd-harmonic, less headroom. Pull it &rarr; toward 1.5, cleaner, more "tube-like," more touch dynamics. This single cap is the main voicing choice.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Max in / Output <span class="glossary-tag">headroom &middot; Vpp</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> two asymmetric edges &mdash; gate driven up to conduction (V<sub>GS</sub>&nbsp;&asymp;&nbsp;+0.6&nbsp;V) and down to cutoff (V<sub>GS</sub>=V<sub>P</sub>) &mdash; mapped through the gain to an input window and an output swing, measured on the same load line the waveform uses.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> "Max in" is the biggest clean input before either edge clips (compare directly to the Input slider, also Vpp). "Output" is the swing actually delivered now, post-clipping.</p>
+          <p class="glossary-sonic"><strong>Use it:</strong> compare J1's Output against J2's Max in &mdash; raise Vol until Output exceeds it and that's where the second stage starts to break up. The window is roughly &plusmn;|V<sub>P</sub>|, so a 2N5457 (big |V<sub>P</sub>|) takes hotter signals clean than a J201.</p>
+        </div>
+
+        <span class="glossary-group-title">Dynamics</span>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Gate shift &amp; Block <span class="glossary-tag">blocking distortion &middot; V</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> when the gate swings past ~+0.6&nbsp;V the gate-channel junction conducts, charging the input coupling cap; the mean conduction current &times; the discharge resistance gives the DC bias displacement. The Block meter shows proximity to onset, then the volts of shift past it.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> the JFET's version of grid-current "blocking" &mdash; under heavy drive the bias drifts toward cutoff and the stage chokes/ducks until the cap drains. A DC-coupled stage (no cap) can't store the charge, so it can't block.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> a bigger gate stopper R<sub>g</sub> limits the conduction current (gentler onset); a smaller coupling cap recovers faster (tighter, less "duck"). The classic high-gain trade between fullness and tightness.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Bias excursion <span class="glossary-tag">source-cap drift &middot; V</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> mean instantaneous source voltage over the settled window minus its quiescent value &mdash; the bypass cap holds the source with &tau;=R<sub>s</sub>&middot;C<sub>s</sub>, so asymmetric current drifts it away from idle.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> slow self-rebias under sustained signal &mdash; the compression component of "feel." Only present when a source bypass cap exists.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> bigger C<sub>s</sub> lengthens the bloom/squash on held notes; remove it and the excursion vanishes (stiffer, faster, ~6&nbsp;dB less gain &mdash; the Fetzer voicing).</p>
+        </div>
+
+        <span class="glossary-group-title">Network &middot; interstage &amp; output</span>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Attenuation / Source Z <span class="glossary-tag">interstage divider</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> standard pot-divider math at the Vol wiper &mdash; attenuation = R<sub>pot_bot</sub>/(R<sub>series</sub>+R<sub>pot</sub>); source Z = (R<sub>series</sub>+R<sub>pot_top</sub>)&nbsp;&#8741;&nbsp;R<sub>pot_bot</sub>, peaking near mid-rotation.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> how much of J1's output reaches J2's gate, and the impedance feeding it (which, with J2's Miller capacitance, sets the HF rolloff and sits in the blocking-charge path).</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> Vol decides <em>where</em> the chain distorts &mdash; low Vol keeps J2 clean, high Vol slams it (watch its Block meter). A bright cap across the pot's top half lifts the highs that the mid-rotation impedance peak would otherwise dull.</p>
+        </div>
+
+        <div class="glossary-entry">
+          <div class="glossary-term">Master / Output Z <span class="glossary-tag">output divider</span></div>
+          <p class="glossary-how"><strong>Calculated:</strong> same divider math on the output network; Output Z = (R<sub>series</sub>+R<sub>pot_top</sub>+Z<sub>out&nbsp;J2</sub>)&nbsp;&#8741;&nbsp;R<sub>pot_bot</sub> at the master wiper.</p>
+          <p class="glossary-what"><strong>Circuit impact:</strong> sets output level after all distortion is generated, and the impedance the outside world sees. Set J2 to source follower and this Z drops dramatically &mdash; the buffered output.</p>
+          <p class="glossary-sonic"><strong>Sonic levers:</strong> driving long cables or a fuzz from a high CS output shaves treble; a source-follower last stage (or running Master high / a smaller master pot) keeps the output stiff and bright.</p>
+        </div>
+
+      </div>
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Two-stage JFET designer.
+   Signal flow:  J1 ── Cout ──► Network (Rseries + pot + Cbright) ──► J2
+                    ── Cout2 ──► Output network (master volume) ──► out
+
+   Device physics — Shockley square law (N-channel, VP < 0):
+     saturation (Vds ≥ Vgs−VP):  Id = IDSS·(1−Vgs/VP)²·(1+λ·Vds)
+     ohmic     (0 ≤ Vds < Vgs−VP): Id = IDSS·(2k·u − u²)·(1+λ·Vds),
+                                    k = 1−Vgs/VP,  u = Vds/|VP|
+     cutoff    (Vgs ≤ VP):        Id = 0
+   The triode↔JFET correspondence (plate↔drain, grid↔gate, cathode↔source)
+   lets the preamp's bias/headroom/blocking/Bode engine port directly:
+     • grid current at Vg=0  →  gate-channel conduction at Vgs ≈ +0.6 V
+     • cathode bypass cap    →  source bypass cap
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// ── Device table ───────────────────────────────────────────────────────────
+// Seeded TYPICAL values (override IDSS/VP per stage from a DCA75). VP is the
+// pinch-off / VGS(off), negative. lambda is channel-length modulation (→ rd).
+// Ciss/Crss (pF) drive the Miller rolloff: Cgd = Crss, Cgs = Ciss − Crss.
+const DEVICES = {
+  'J201':   { name: 'J201',   smd: 'MMBFJ201', VP: -0.7, IDSS: 0.6,  lambda: 0.020, Ciss: 5.0,  Crss: 2.0 },
+  '2N5457': { name: '2N5457', smd: 'MMBF5457', VP: -1.6, IDSS: 3.0,  lambda: 0.018, Ciss: 6.0,  Crss: 2.5 },
+  '2N5458': { name: '2N5458', smd: 'MMBF5458', VP: -3.0, IDSS: 5.5,  lambda: 0.015, Ciss: 6.0,  Crss: 2.5 },
+  'J112':   { name: 'J112',   smd: 'MMBFJ112', VP: -3.0, IDSS: 8.0,  lambda: 0.025, Ciss: 9.0,  Crss: 3.5 },
+  'LSK170': { name: 'LSK170', smd: 'SOT-23 avail.', VP: -0.4, IDSS: 6.0, lambda: 0.010, Ciss: 30.0, Crss: 6.0 },
+  'BF862':  { name: 'BF862',  smd: 'SOT-23 only',   VP: -0.6, IDSS: 10.0, lambda: 0.012, Ciss: 10.0, Crss: 1.9 }
+};
+const DEVICE_ORDER = ['J201', '2N5457', '2N5458', 'J112', 'LSK170', 'BF862'];
+const DEFAULT_DEVICE = 'J201';
+
+// ── Simulator constants ────────────────────────────────────────────────────
+const SR            = 48000;   // internal simulation sample rate (Hz)
+const NCYCLES       = 40;      // minimum warm-up cycles before plotting
+const FTEST_DEFAULT = 1000;    // default test-tone frequency (Hz)
+const Vphi          = 0.6;     // gate-channel conduction onset (V)
+const Rg_cond       = 1000;    // gate-diode conduction resistance (Ω); Rg adds in series
+const Vds_floor     = 0.02;    // numerical lower bound for the drain/source bisection
+
+/** Drain current (mA) for the given Vds, Vgs and device. Square law with an
+ *  ohmic region below saturation so the lower (compression) clip is physical. */
+function jfetId(Vds, Vgs, dev) {
+  if (Vds < 0) Vds = 0;
+  const VP = dev.VP, absVP = Math.abs(VP);
+  if (Vgs <= VP) return 0;                 // cutoff
+  const k = 1 - Vgs / VP;                   // = Vov/|VP|, in [0 .. ~]
+  if (k <= 0) return 0;
+  const Vov = k * absVP;
+  const mod = 1 + dev.lambda * Vds;
+  if (Vds >= Vov) {
+    return dev.IDSS * k * k * mod;          // saturation
+  }
+  const u = Vds / absVP;                     // ohmic / triode region
+  return dev.IDSS * (2 * k * u - u * u) * mod;
+}
+
+// ── DOM / value helpers ────────────────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function txt(id, v) { const e = $(id); if (e) e.textContent = v; }
+
+/** Read a numeric input × its unit multiplier. Returns null if empty/invalid
+ *  (when positive===true) or the raw signed value (positive===false). */
+function getV(id, uid, signed) {
+  const el = $(id); if (!el) return null;
+  const raw = el.value.trim();
+  if (raw === '') return null;
+  const mul = uid ? parseFloat($(uid).value) : 1;
+  const v = parseFloat(raw) * mul;
+  if (!isFinite(v)) return null;
+  return signed ? v : (v > 0 ? v : null);
+}
+
+/** Format a resistance in Ω as an autoscaled "M/k/Ω" string. */
+function fmtR(ohms) {
+  if (!ohms || !isFinite(ohms)) return '—';
+  if (ohms >= 1e6) return (ohms/1e6).toFixed(1) + ' MΩ';
+  if (ohms >= 1e3) return (ohms/1e3).toFixed(1) + ' kΩ';
+  return ohms.toFixed(0) + ' Ω';
+}
+
+// ── Global state ────────────────────────────────────────────────────────────
+let ST_J1 = null, ST_NET = null, ST_J2 = null, ST_OUTNET = null;
+
+// ── Device / config selector handlers ───────────────────────────────────────
+/** Populate a device <select> with the catalog (name · SMD · key specs). */
+function fillDeviceSelect(id) {
+  const sel = $(id); if (!sel) return;
+  sel.innerHTML = '';
+  DEVICE_ORDER.forEach(key => {
+    const d = DEVICES[key];
+    const o = document.createElement('option');
+    o.value = key;
+    o.textContent = d.name + ' · ' + d.smd + ' · Vp ' + d.VP + 'V';
+    if (key === DEFAULT_DEVICE) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+/** When the device changes, seed that stage's IDSS / VP fields and clear the
+ *  part-specific measurements (gfs, rd) — they belonged to the previous device,
+ *  so leaving them would silently mismatch the newly-selected type. The user
+ *  re-enters their DCA75 readings for the new part. */
+function onDeviceChange(suf) {
+  const key = $('in-dev' + suf).value;
+  const d = DEVICES[key] || DEVICES[DEFAULT_DEVICE];
+  $('in-idss' + suf).value  = d.IDSS;
+  $('in-vp' + suf).value    = d.VP;
+  $('in-gfs' + suf).value   = '';
+  $('in-rdovr' + suf).value = '';
+  recalc();
+}
+
+/** gfs cross-check: a DCA75 gfs reading (≈ gm at the IDSS test point) should
+ *  match the square-law model's gm0 = 2·IDSS/|VP|. Show the model value and
+ *  flag a >15% divergence so the user knows their IDSS / VP / gfs readings (or
+ *  the square-law fit to a real part) disagree. Display-only — never overrides. */
+function updateGfsCheck(suf) {
+  const note = $('gfs-note' + suf); if (!note) return;
+  const gfs = getV('in-gfs' + suf);
+  if (gfs == null) { note.textContent = ''; note.className = 'dca-cross'; return; }
+  const dev = readDevice(suf);
+  const gm0 = 2 * dev.IDSS / Math.abs(dev.VP);
+  if (!isFinite(gm0) || gm0 <= 0) { note.textContent = ''; note.className = 'dca-cross'; return; }
+  if (Math.abs(gfs - gm0) / gm0 <= 0.15) {
+    note.textContent = '≈ model gm0 ' + gm0.toFixed(2) + ' mA/V ✓';
+    note.className = 'dca-cross ok';
+  } else {
+    note.textContent = '≠ model gm0 ' + gm0.toFixed(2) + ' mA/V';
+    note.className = 'dca-cross warn';
+  }
+}
+
+/** Show/hide config-specific fields (Rd, Cs hidden for source followers). */
+function applyConfigVisibility(suf) {
+  const cfg = $('in-config' + suf).value;
+  const isSF = cfg === 'sf';
+  const rd = $('fld-rd' + suf), cs = $('fld-cs' + suf);
+  if (rd) rd.style.display = isSF ? 'none' : '';
+  if (cs) cs.style.display = isSF ? 'none' : '';
+  txt('out-vd-lbl' + suf, isSF ? 'Vs' : 'Vd');
+  txt('cfg-badge' + suf, isSF ? 'SF' : 'CS');
+}
+function onConfigChange(suf) { applyConfigVisibility(suf); recalc(); }
+
+// ── Slider handlers ─────────────────────────────────────────────────────────
+function onPotChange() { txt('pot-display', parseFloat($('pot-slider').value).toFixed(1)); recalc(); }
+function onMasterChange() { txt('master-display', parseFloat($('master-slider').value).toFixed(1)); recalc(); }
+function getInputVpp() { return parseFloat($('amp-slider').value) || 0; }
+function getInputPeak() { return getInputVpp() / 2; }
+function getTestFreq() {
+  const logHz = parseFloat($('freq-slider').value);
+  return isFinite(logHz) ? Math.pow(10, logHz) : FTEST_DEFAULT;
+}
+function fmtTestFreq(hz) { return hz >= 1000 ? (hz/1000).toFixed(2) + ' kHz' : hz.toFixed(0) + ' Hz'; }
+function onAmpChange() {
+  txt('amp-val', getInputVpp().toFixed(2) + ' Vpp');
+  runChain(); drawWaveJ1(); drawWaveJ2();
+}
+function onFreqChange() {
+  txt('freq-val', fmtTestFreq(getTestFreq()));
+  runChain(); drawWaveJ1(); drawWaveJ2(); drawFreqCombined();
+}
+
+/** Build a device object for a stage from its (possibly DCA75-overridden) fields. */
+function readDevice(suf) {
+  const key = $('in-dev' + suf).value;
+  const base = DEVICES[key] || DEVICES[DEFAULT_DEVICE];
+  const IDSS = getV('in-idss' + suf);
+  const VP   = getV('in-vp' + suf, null, true);   // signed (negative)
+  const rdOvrOhm = getV('in-rdovr' + suf, 'in-rdovr' + suf + '-u');
+  return {
+    name: base.name, smd: base.smd,
+    IDSS: (IDSS != null && IDSS > 0) ? IDSS : base.IDSS,
+    VP:   (VP != null && VP < 0) ? VP : base.VP,
+    lambda: base.lambda, Ciss: base.Ciss, Crss: base.Crss,
+    // Optional measured drain resistance (kΩ) — back-converted to λ in solveStage.
+    rdOvr: (rdOvrOhm != null && rdOvrOhm > 0) ? rdOvrOhm / 1000 : null
+  };
+}
+
+// ═══ Single-stage solver ══════════════════════════════════════════════════
+/**
+ * Solve DC operating point + small-signal AC parameters for one JFET stage.
+ * Resistances in Ω; a parallel `_k` (kΩ) set is kept for the AC formulas.
+ *
+ *   config 'cs' | 'sf'
+ *   Rd, Rs    — drain / source resistors (Rd ignored for SF: drain → V+)
+ *   Cs        — optional source bypass cap
+ *   Cout      — coupling cap to load
+ *   Rload     — AC load (network total for the driver, output net for J2)
+ *   Rgl       — gate return of THIS stage (Rgate for J1, pot_bot for J2)
+ *   Rg        — gate stopper (forms Miller LP with Cgs/Cgd)
+ *   Cin       — optional input coupling cap (HP with Rgl)
+ *   dev       — device params
+ */
+function solveStage(VCC, config, Rd, Rs, Cs, Cout, Rload, Rgl, Rg, Cin, dev) {
+  const isSF = config === 'sf';
+  const RdEff = isSF ? 0 : Rd;     // SF: drain tied straight to V+
+
+  // ── DC self-bias: bisect source voltage Vs (gate at 0 V DC through Rgate) ─
+  // Mirrors the preamp's Vk bisection: assume Id = Vs/Rs, predict Vds, evaluate
+  // the device, check the resulting Vs against the candidate.
+  const biasVs = d => {
+    let lo = 0, hi = VCC;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      const Vds = VCC - mid * (RdEff + Rs) / Rs;   // = VCC − Id·(Rd+Rs), Id = mid/Rs
+      const VsCalc = jfetId(Vds, -mid, d) * Rs / 1000;
+      if (VsCalc > mid) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+  let Vs = biasVs(dev);
+  let Id = jfetId(VCC - Vs * (RdEff + Rs) / Rs, -Vs, dev);
+  // Optional measured rd (from a DCA75 curve trace) overrides the device's
+  // typical channel-length-modulation λ so the small-signal rd, Zout, gain
+  // ceiling, drain-curve tilt and the time-domain sim all reflect the real
+  // part. We can't invert λ in closed form — the exact slope is rd =
+  // (1+λ·Vds)/(λ·Id) and Id/Vds themselves shift with λ — so we iterate:
+  // re-converge the bias, measure the resulting rd, and scale λ toward target
+  // (rd ∝ 1/λ). A few passes drive the displayed rd onto the entered value.
+  // Source followers are nearly λ-independent (Zout ≈ 1/gm).
+  if (dev.rdOvr && Id > 0) {
+    let lam = 1 / (dev.rdOvr * Id);
+    const dVx = 0.005;
+    for (let k = 0; k < 5; k++) {
+      lam = Math.max(1e-4, Math.min(0.5, lam));
+      dev = Object.assign({}, dev, { lambda: lam });
+      Vs = biasVs(dev);
+      Id = jfetId(VCC - Vs * (RdEff + Rs) / Rs, -Vs, dev);
+      const VdsI = VCC - Id * (RdEff + Rs) / 1000, VgsI = -Vs;
+      const rdCur = (2 * dVx) / (jfetId(VdsI + dVx, VgsI, dev) - jfetId(VdsI - dVx, VgsI, dev));
+      if (!isFinite(rdCur) || rdCur <= 0) break;
+      lam *= rdCur / dev.rdOvr;                 // rd ∝ 1/λ → drives rd → rdOvr
+    }
+  }
+  const Vds = VCC - Id * (RdEff + Rs) / 1000;
+  const Vd  = VCC - Id * RdEff / 1000;             // drain node voltage
+  const Vgs = -Vs;
+  if (!isFinite(Vds) || Vds < 0 || Id <= 0) return null;
+
+  // ── Small-signal params via central difference ─────────────────────────
+  const dV = 0.005;
+  const gm = (jfetId(Vds, Vgs + dV, dev) - jfetId(Vds, Vgs - dV, dev)) / (2 * dV);   // mA/V
+  let rd = (2 * dV) / (jfetId(Vds + dV, Vgs, dev) - jfetId(Vds - dV, Vgs, dev));      // kΩ
+  if (!isFinite(rd) || rd <= 0) rd = 1e6;
+
+  // ── AC formulas (kΩ, mA) ───────────────────────────────────────────────
+  const Rd_k = RdEff / 1000, Rs_k = Rs / 1000, Rload_k = (Rload || 1e12) / 1000;
+  const Rg_k = Rg ? Rg / 1000 : 0, Rgl_k = Rgl ? Rgl / 1000 : 0;
+  const par = (a, b) => (a * b) / (a + b);
+
+  let Av, Av_unbypassed, Zout, Zin;
+  if (isSF) {
+    // Source follower: output at the source, gain < 1, low Zout.
+    const RsLoad = par(Rs_k, Rload_k);
+    Av = (gm * RsLoad) / (1 + gm * RsLoad);
+    Av_unbypassed = Av;                               // no bypass concept here
+    Zout = par(Rs_k, 1 / gm);
+    Zin = Rg_k + Rgl_k;
+  } else {
+    const RdLoad = par(Rd_k, Rload_k);
+    const Rout_b = par(RdLoad, rd);
+    Av = -gm * Rout_b;                                // bypassed source
+    Av_unbypassed = -gm * Rout_b / (1 + gm * Rs_k);   // unbypassed (Fetzer)
+    const rd_unb = rd * (1 + gm * Rs_k);             // degeneration raises drain res
+    Zout = Cs ? par(Rd_k, rd) : par(Rd_k, rd_unb);
+    Zin = Rg_k + Rgl_k;
+  }
+
+  // ── Headroom: two asymmetric edges (gate conduction vs. cutoff) ─────────
+  const AvEff = Math.abs(isSF ? Av : (Cs ? Av : Av_unbypassed));   // input→output gain
+  const AvIntrinsic = Math.abs(isSF ? Av : Av);                    // Vgate→output transfer
+  // Gate-volt windows from the quiescent Vgs (= −Vs):
+  const inPos = Vphi - Vgs;          // up to gate conduction (Vgs → +0.6)
+  const inNeg = Vgs - dev.VP;        // down to cutoff (Vgs → VP)
+  const maxCleanInput = Math.min(inPos, inNeg);
+
+  const refStage = { VCC, Rd: RdEff, Rs, Rload, Vs, dev, config };
+  const nodeQ = isSF ? Vs : Vd;
+  const loadRefQ = (Cout && Rload) ? nodeQ : null;
+  // Output-node voltage at each drive extreme, on the live load line:
+  const nodeCutoff = solveNode(refStage, dev.VP - 5, loadRefQ);   // gate to cutoff
+  const nodeCond   = solveNode(refStage, Vphi,       loadRefQ);   // gate to conduction
+  // CS: cutoff → drain rises (+out); conduction → drain falls (−out).
+  // SF: cutoff → source falls (−out); conduction → source rises (+out).
+  let clipPosPeak, clipNegPeak;
+  if (isSF) {
+    clipPosPeak = Math.max(0, Math.min(nodeCond - nodeQ,  inPos * AvIntrinsic));
+    clipNegPeak = Math.max(0, Math.min(nodeQ - nodeCutoff, inNeg * AvIntrinsic));
+  } else {
+    clipPosPeak = Math.max(0, Math.min(nodeCutoff - nodeQ, inNeg * AvIntrinsic));
+    clipNegPeak = Math.max(0, Math.min(nodeQ - nodeCond,   inPos * AvIntrinsic));
+  }
+  const maxCleanOutputPeak = Math.min(clipPosPeak, clipNegPeak);
+  const maxSwingVpp = clipPosPeak + clipNegPeak;
+  const maxCleanInputVpp = AvEff > 0 ? (maxCleanOutputPeak / AvEff) * 2 : 0;
+
+  // ── Harmonic power-law exponent (input→output) at the operating point ────
+  const nlaw = computePowerLaw({ VCC, RdEff, Rs, Cs, Rload, dev, config });
+
+  return {
+    VCC, config, isSF, Rd: RdEff, Rs, Cs, Cout, Rload, Rgl, Rg, Cin, dev,
+    Rd_k, Rs_k, Rload_k, Rgl_k, Rg_k,
+    Vs, Id, Vds, Vd, Vgs,
+    gm, rd, Av, Av_unbypassed, Zin, Zout,
+    maxCleanInput, maxCleanOutputPeak, maxSwingVpp, maxCleanInputVpp,
+    clipPosPeak, clipNegPeak, nlaw,
+    dyn: {
+      Vs_inst: Vs, Vc_coupling_in: 0, Vc_coupling_out: 0,
+      dcGateShift: 0, dcSourceShift: 0, gateClampRatio: 0,
+      blocking: false, blkDisp: 0, blkSeverity: 0,
+      gridMin: 0, gridMax: 0, gridMean: 0
+    }
+  };
+}
+
+/**
+ * Solve the static output-node voltage (drain for CS, source for SF) for a
+ * fixed gate voltage Vg (= Vgs at the quiescent source, used for clip refs).
+ * KCL with the coupling-cap load reflected onto the node, mirroring the
+ * preamp's solvePlate. Bisection on a monotone residual.
+ */
+function solveNode(ref, Vg, VcAbs) {
+  const isSF = ref.config === 'sf';
+  const RsK = ref.Rs / 1000, RloadK = (ref.Rload || 1e12) / 1000;
+  const loaded = (VcAbs != null);
+  if (isSF) {
+    // Source node: Id(into node) = Vs/Rs + load. Vds = VCC − Vs (drain at V+).
+    let lo = 0, hi = ref.VCC;
+    for (let i = 0; i < 36; i++) {
+      const Vs = (lo + hi) / 2;
+      const id = jfetId(ref.VCC - Vs, Vg - Vs, ref.dev);
+      const out = Vs / RsK + (loaded ? (Vs - VcAbs) / RloadK : 0);
+      if (id > out) lo = Vs; else hi = Vs;   // raising Vs lowers id, raises out
+    }
+    return (lo + hi) / 2;
+  }
+  // Drain node (CS): (VCC−Vd)/Rd = Id + load. Vds ≈ Vd − Vs_quiescent.
+  const RdK = ref.Rd / 1000;
+  let lo = Vds_floor, hi = ref.VCC;
+  for (let i = 0; i < 36; i++) {
+    const Vd = (lo + hi) / 2;
+    const id = jfetId(Vd - ref.Vs, Vg, ref.dev);
+    const f = (ref.VCC - Vd) / RdK - id - (loaded ? (Vd - VcAbs) / RloadK : 0);
+    if (f > 0) lo = Vd; else hi = Vd;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Power-law exponent of the channel transfer, referenced to CUTOFF — the basis
+ * of the Fetzer "1.5 vs 2.0" distinction. (A local derivative at the bias point
+ * is always ~1.0; the square-law character only shows up as a large-signal fit
+ * Id ∝ (Vin − Vin_cutoff)^n.) Bypassed: source held by the cap, so the input
+ * acts straight on Vgs and the bare device's square law gives n ≈ 2.0.
+ * Unbypassed: re-solving the DC point at each input lets source degeneration
+ * bend the transfer toward the triode three-halves law (n ≈ 1.5).
+ */
+function computePowerLaw(p) {
+  const isSF = p.config === 'sf';
+  const bypassed = !!(p.Cs && p.Cs > 0 && !isSF);
+  const dev = p.dev, VP = dev.VP, absVP = Math.abs(VP);
+  const q0 = solveDCAtGate(p, 0);
+  const VsQ = q0.Vs;
+  const VdsQ = Math.max(0.5, p.VCC - q0.Id * (p.RdEff + p.Rs) / 1000);
+  // Gate voltage that just cuts the channel off (Id → 0):
+  //   bypassed  → source pinned at VsQ, so Vgs = g − VsQ = VP  ⇒ g = VP + VsQ
+  //   unbypassed→ source falls with current, cutoff at Vs = 0  ⇒ g = VP
+  const gateCut = bypassed ? (VP + VsQ) : VP;
+  const idAt = g => bypassed ? jfetId(VdsQ, g - VsQ, dev) : solveDCAtGate(p, g).Id;
+  const x1 = 0.4 * absVP, x2 = 0.8 * absVP;     // two points up from cutoff
+  const i1 = idAt(gateCut + x1), i2 = idAt(gateCut + x2);
+  if (i1 <= 0 || i2 <= 0) return 1.5;
+  const n = Math.log(i2 / i1) / Math.log(x2 / x1);
+  return Math.max(1, Math.min(2.2, n));
+}
+
+/** DC operating point with the gate shifted by vinG (V). Returns Id and the
+ *  output node voltage (drain for CS, source for SF). Includes degeneration. */
+function solveDCAtGate(p, vinG) {
+  const isSF = p.config === 'sf';
+  const RdEff = p.RdEff, Rs = p.Rs, VCC = p.VCC, dev = p.dev;
+  let lo = 0, hi = VCC;
+  for (let i = 0; i < 48; i++) {
+    const mid = (lo + hi) / 2;                 // candidate Vs
+    const Vds = VCC - mid * (RdEff + Rs) / Rs;
+    const IdTest = jfetId(Vds, vinG - mid, dev);
+    const VsCalc = IdTest * Rs / 1000;
+    if (VsCalc > mid) lo = mid; else hi = mid;
+  }
+  const Vs = (lo + hi) / 2;
+  const Id = jfetId(VCC - Vs * (RdEff + Rs) / Rs, vinG - Vs, dev);
+  const node = isSF ? Vs : (VCC - Id * RdEff / 1000);
+  return { Id, Vs, node };
+}
+
+// ═══ Main orchestrator ════════════════════════════════════════════════════
+function recalc() {
+  // gfs cross-check notes update regardless of whether a stage solves.
+  updateGfsCheck(''); updateGfsCheck('2');
+
+  // ── 1. Network inputs ──────────────────────────────────────────────────
+  const Rseries = getV('in-rseries', 'in-rseries-u') || 0;
+  const Rpot    = getV('in-rpot',    'in-rpot-u')    || 1e6;
+  const Cbright = getV('in-cbright', 'in-cbright-u');
+  const w = parseFloat($('pot-slider').value) / 10;
+  const netRload = Rseries + Rpot;
+
+  // ── 2. J1 inputs + solve ───────────────────────────────────────────────
+  const VCC = getV('in-vcc');
+  const cfg1 = $('in-config').value;
+  const Rd  = getV('in-rd',  'in-rd-u');
+  const Rs  = getV('in-rs',  'in-rs-u');
+  const Cs  = getV('in-cs',  'in-cs-u');
+  const Cout = getV('in-cout', 'in-cout-u');
+  const Rg  = getV('in-rg',  'in-rg-u');
+  const Cin = getV('in-cin', 'in-cin-u');
+  const Rgate = getV('in-rgate', 'in-rgate-u') || 1e6;
+  const dev1 = readDevice('');
+
+  if (!VCC || !Rs || (cfg1 === 'cs' && !Rd)) {
+    ST_J1 = null; ST_NET = null; ST_J2 = null;
+    clearStageResults(''); clearStageResults('2'); drawAll(); return;
+  }
+
+  ST_J1 = solveStage(VCC, cfg1, Rd, Rs, Cs, Cout, netRload, Rgate, Rg, Cin, dev1);
+  if (!ST_J1) {
+    ST_NET = null; ST_J2 = null;
+    clearStageResults(''); clearStageResults('2'); drawAll(); return;
+  }
+  writeStageResults(ST_J1, '');
+  $('j1-rload-display').textContent = 'Rload: ' + fmtR(netRload);
+  txt('out-blkrec', Cin ? (Cin * Rgate * 1000).toFixed(1) : '—');
+
+  // ── 3. Interstage network math ─────────────────────────────────────────
+  const Rpot_top = Rpot * (1 - w);
+  const Rpot_bot = Rpot * w;
+  const attenLinear = w > 0 ? Rpot_bot / (Rseries + Rpot) : 0;
+  const attenDb = attenLinear > 0 ? 20 * Math.log10(attenLinear) : -Infinity;
+  const sourceZ = (w > 0 && w < 1)
+    ? (Rseries + Rpot_top) * Rpot_bot / (Rseries + Rpot_top + Rpot_bot)
+    : (w === 0 ? 0 : Rseries);
+  ST_NET = { Rseries, Rpot, Cbright, w, Rpot_top, Rpot_bot, attenLinear, attenDb, sourceZ, netRload };
+
+  txt('net-atten', attenDb > -100 ? attenDb.toFixed(1) + ' dB' : '-∞ dB');
+  txt('net-srcz',  fmtR(sourceZ));
+  txt('net-rload', fmtR(netRload));
+  txt('net-rgl',   fmtR(Rpot_bot));
+
+  // ── 4. Output network (master volume) ──────────────────────────────────
+  const RseriesOut = getV('in-rseries-out', 'in-rseries-out-u') || 0;
+  const RpotOut    = getV('in-rpot-out',    'in-rpot-out-u')    || 1e6;
+  const w2 = parseFloat($('master-slider').value) / 10;
+  const outRload = RseriesOut + RpotOut;
+  $('j2-rload-display').textContent = fmtR(outRload);
+  $('j2-vcc-display').textContent = VCC + ' V';
+
+  // ── 5. J2 inputs + solve ───────────────────────────────────────────────
+  const cfg2 = $('in-config2').value;
+  const Rd2  = getV('in-rd2',  'in-rd2-u');
+  const Rs2  = getV('in-rs2',  'in-rs2-u');
+  const Cs2  = getV('in-cs2',  'in-cs2-u');
+  const Cout2 = getV('in-cout2', 'in-cout2-u');
+  const Rg2  = getV('in-rg2',  'in-rg2-u');
+  const dev2 = readDevice('2');
+  const Rgl_j2 = Rpot_bot;
+  $('j2-rgl-display').textContent = 'Gate return: ' + fmtR(Rpot_bot);
+
+  // Interstage blocking time constants (network numbers stay live even if J2
+  // has no signal path).
+  const RgBranch = (Rg2 || 0) + Rg_cond;
+  const tauChg = Cout ? Cout * ((Rseries + Rpot_top) + (RgBranch * Rpot_bot) / (RgBranch + Rpot_bot)) : 0;
+  const tauRec = Cout ? Cout * (Rseries + Rpot + ST_J1.Zout * 1000) : 0;
+  txt('net-blkchg', tauChg > 0 ? (tauChg * 1000).toFixed(1) + ' ms' : '—');
+  txt('net-blkrec', tauRec > 0 ? (tauRec * 1000).toFixed(1) + ' ms' : '—');
+  txt('out-blkrec2', tauRec > 0 ? (tauRec * 1000).toFixed(1) : '—');
+
+  if (!Rs2 || (cfg2 === 'cs' && !Rd2) || Rpot_bot <= 0) {
+    ST_J2 = null; ST_OUTNET = null; clearStageResults('2'); drawAll(); return;
+  }
+
+  ST_J2 = solveStage(VCC, cfg2, Rd2, Rs2, Cs2, Cout2, outRload, Rgl_j2, Rg2, null, dev2);
+  if (!ST_J2) { ST_OUTNET = null; clearStageResults('2'); drawAll(); return; }
+
+  // Output-network derived values (need J2's Zout).
+  const RpotOut_top = RpotOut * (1 - w2);
+  const RpotOut_bot = RpotOut * w2;
+  const attenOut = w2 > 0 ? RpotOut_bot / (RseriesOut + RpotOut) : 0;
+  const ZoutJ2_ohm = ST_J2.Zout * 1000;
+  const upperLeg = RseriesOut + RpotOut_top + ZoutJ2_ohm;
+  const sourceZOut = w2 > 0 ? (upperLeg * RpotOut_bot) / (upperLeg + RpotOut_bot) : 0;
+  ST_OUTNET = { RseriesOut, RpotOut, w2, RpotOut_top, RpotOut_bot, attenOut, sourceZOut, outRload };
+
+  const mattenDb = attenOut > 0 ? 20 * Math.log10(attenOut) : -Infinity;
+  txt('net-matten',   mattenDb > -100 ? mattenDb.toFixed(1) + ' dB' : '-∞ dB');
+  txt('net-outrload', fmtR(outRload));
+  txt('net-outz',     sourceZOut > 0 ? fmtR(sourceZOut) : '0 Ω');
+  $('net-out-zhint').textContent = 'Output Z: ' + (sourceZOut > 0 ? fmtR(sourceZOut) : '0 Ω');
+
+  writeStageResults(ST_J2, '2');
+  drawAll();
+}
+
+// ── Result display ──────────────────────────────────────────────────────────
+function writeStageResults(ST, suf) {
+  txt('out-vd'  + suf, (ST.isSF ? ST.Vs : ST.Vd).toFixed(1));
+  txt('out-vgs' + suf, ST.Vgs.toFixed(2));
+  txt('out-id'  + suf, ST.Id.toFixed(3));
+  const AvEff = Math.abs(ST.isSF ? ST.Av : (ST.Cs ? ST.Av : ST.Av_unbypassed));
+  txt('out-gain' + suf, AvEff.toFixed(2));
+  txt('out-gain-db' + suf, (20 * Math.log10(Math.max(AvEff, 1e-6))).toFixed(1) + ' dB');
+  txt('out-gm'  + suf, ST.gm.toFixed(3));
+  // rd is in kΩ; autoscale Ω / kΩ / MΩ so a low ohmic-region rd doesn't read "0".
+  if      (ST.rd >= 1000) { txt('out-rd' + suf, (ST.rd/1000).toFixed(1)); txt('out-rd' + suf + '-u', 'MΩ'); }
+  else if (ST.rd >= 1)    { txt('out-rd' + suf, ST.rd.toFixed(0));        txt('out-rd' + suf + '-u', 'kΩ'); }
+  else                    { txt('out-rd' + suf, (ST.rd*1000).toFixed(0)); txt('out-rd' + suf + '-u', 'Ω'); }
+  const Zin = ST.Zin;
+  if (Zin >= 1000) { txt('out-zin' + suf, (Zin/1000).toFixed(1)); txt('out-zin' + suf + '-u', 'MΩ'); }
+  else             { txt('out-zin' + suf, Zin.toFixed(1));         txt('out-zin' + suf + '-u', 'kΩ'); }
+  if (ST.Zout < 1) { txt('out-zout' + suf, (ST.Zout*1000).toFixed(0)); txt('out-zout' + suf + '-u', 'Ω'); }
+  else             { txt('out-zout' + suf, ST.Zout.toFixed(1));        txt('out-zout' + suf + '-u', 'kΩ'); }
+  txt('out-maxin' + suf, ST.maxCleanInputVpp.toFixed(2));
+  txt('out-nlaw'  + suf, ST.isSF ? '—' : ST.nlaw.toFixed(2));
+}
+
+function clearStageResults(suf) {
+  ['out-vd','out-vgs','out-id','out-gain','out-gm','out-rd','out-zin','out-zout','out-swing',
+   'out-nlaw','out-grid-shift','out-bias-exc','out-maxin','out-blkrec']
+    .forEach(id => txt(id + suf, '—'));
+  txt('out-gain-db' + suf, '');
+  const fill = $('blk-fill' + suf), val = $('blk-val' + suf);
+  if (fill) { fill.style.width = '0'; fill.className = 'blk-fill'; }
+  if (val)  { val.textContent = '—'; val.className = 'hr-value blk-val'; }
+}
+
+function drawAll() {
+  runChain();
+  drawCurves('chart-curve-j1', 'curve-legend-j1', ST_J1);
+  drawCurves('chart-curve-j2', 'curve-legend-j2', ST_J2);
+  drawWaveJ1();
+  drawWaveJ2();
+  drawFreqStage('chart-freq-j1', 'freq-legend-j1', ST_J1);
+  drawFreqStage('chart-freq-j2', 'freq-legend-j2', ST_J2, { includeNetwork: true });
+  drawFreqCombined();
+}
+
+// ═══ Canvas utilities ═════════════════════════════════════════════════════
+function initCanvas(id) {
+  const canvas = $(id); if (!canvas) return null;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 1; canvas.height = 1;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return null;
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, W: rect.width, H: rect.height };
+}
+const FONT = (getComputedStyle(document.documentElement).getPropertyValue('--font-mono') || 'monospace').trim();
+const COL = {
+  bg:'#f5f6f8', grid:'#e4e7ec', axis:'#d0d4dc', text:'#555d6e', textLight:'#8a92a1',
+  accent:'#1a7d5a', red:'#c0392b', blue:'#4a6fa5', orange:'#d4760a', purple:'#7b4fb0', green:'#2d8a55'
+};
+
+// ═══ Drain characteristics chart ══════════════════════════════════════════
+function drawCurves(canvasId, legendId, ST) {
+  const c = initCanvas(canvasId); if (!c) return;
+  const { ctx, W, H } = c;
+  const pad = { top: 16, right: 20, bottom: 38, left: 56 };
+  const pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+  ctx.fillStyle = COL.bg; ctx.beginPath(); ctx.roundRect(0, 0, W, H, 6); ctx.fill();
+  const leg = $(legendId); if (leg) leg.innerHTML = '';
+  if (!ST) return;
+
+  const dev = ST.dev;
+  const VdsMax = ST.VCC;
+  const RdcOhm = (ST.Rd || 0) + ST.Rs;            // DC load-line resistance
+  const IdMaxLoad = RdcOhm > 0 ? ST.VCC / RdcOhm * 1000 : dev.IDSS;
+  const IdMax = Math.max(IdMaxLoad * 1.1, dev.IDSS * 1.1, ST.Id * 2, 0.5);
+
+  const xOf = v => pad.left + (v / VdsMax) * pw;
+  const yOf = i => pad.top + (1 - i / IdMax) * ph;
+
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 0.5;
+  for (let v = 0; v <= VdsMax; v += VdsMax/5) { ctx.beginPath(); ctx.moveTo(xOf(v), pad.top); ctx.lineTo(xOf(v), pad.top+ph); ctx.stroke(); }
+  for (let i = 0; i <= IdMax; i += IdMax/4) { ctx.beginPath(); ctx.moveTo(pad.left, yOf(i)); ctx.lineTo(pad.left+pw, yOf(i)); ctx.stroke(); }
+
+  // Constant-Vgs family from 0 down to VP.
+  const absVP = Math.abs(dev.VP);
+  const vgStep = [0.1, 0.25, 0.5, 1].find(s => absVP / s <= 9) || 2;
+  const vgSteps = [];
+  for (let vg = 0; vg >= dev.VP - 1e-9; vg -= vgStep) vgSteps.push(vg);
+  vgSteps.forEach(vg => {
+    ctx.strokeStyle = '#c8ccd4'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let px = 0; px <= pw; px += 2) {
+      const Vds = (px / pw) * VdsMax;
+      const Id = jfetId(Vds, vg, dev);
+      const x = xOf(Vds), y = yOf(Math.min(Id, IdMax));
+      if (px === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    const labelId = jfetId(VdsMax * 0.9, vg, dev);
+    if (labelId > 0.03 && labelId < IdMax * 0.92) {
+      ctx.fillStyle = COL.textLight; ctx.font = '10px ' + FONT;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText('Vgs=' + vg.toFixed(2), xOf(VdsMax*0.9) + 3, yOf(labelId) - 2);
+    }
+  });
+
+  // DC load line: slope −1/(Rd+Rs).
+  if (RdcOhm > 0) {
+    ctx.strokeStyle = COL.red; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(xOf(VdsMax), yOf(0)); ctx.lineTo(xOf(0), yOf(Math.min(IdMaxLoad, IdMax))); ctx.stroke();
+  }
+  // AC load line through the operating point: slope −1/(Rd‖Rload) (CS) or Rs‖Rload (SF).
+  const Rac = ST.isSF ? ((ST.Rs_k * ST.Rload_k)/(ST.Rs_k + ST.Rload_k))
+                      : ((ST.Rd_k * ST.Rload_k)/(ST.Rd_k + ST.Rload_k));
+  if (Rac > 0 && isFinite(Rac)) {
+    ctx.strokeStyle = COL.accent; ctx.lineWidth = 1.5; ctx.setLineDash([6,4]);
+    const acVp0 = ST.Vds + ST.Id * Rac;
+    const acIp0 = ST.Id + ST.Vds / Rac;
+    ctx.beginPath();
+    ctx.moveTo(xOf(Math.min(acVp0, VdsMax)), yOf(Math.max(0, ST.Id - (Math.min(acVp0, VdsMax) - ST.Vds)/Rac)));
+    ctx.lineTo(xOf(0), yOf(Math.min(acIp0, IdMax)));
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Operating point.
+  ctx.fillStyle = COL.accent; ctx.beginPath(); ctx.arc(xOf(ST.Vds), yOf(ST.Id), 5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = COL.accent; ctx.lineWidth = 0.5; ctx.setLineDash([2,2]);
+  ctx.beginPath(); ctx.moveTo(xOf(ST.Vds), yOf(ST.Id)); ctx.lineTo(xOf(ST.Vds), pad.top+ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(xOf(ST.Vds), yOf(ST.Id)); ctx.lineTo(pad.left, yOf(ST.Id)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axis labels.
+  ctx.fillStyle = COL.text; ctx.font = '11px ' + FONT;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let v = 0; v <= VdsMax; v += VdsMax/5) ctx.fillText(v.toFixed(0), xOf(v), pad.top+ph+8);
+  ctx.fillText('Vds (V)', pad.left + pw/2, pad.top+ph+22);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= IdMax; i += IdMax/4) ctx.fillText(i.toFixed(2), pad.left-6, yOf(i));
+  ctx.save(); ctx.translate(12, pad.top+ph/2); ctx.rotate(-Math.PI/2);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Id (mA)', 0, 0); ctx.restore();
+
+  ctx.fillStyle = COL.accent; ctx.font = 'bold 11px ' + FONT;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+  ctx.fillText(ST.Vds.toFixed(1) + 'V, ' + ST.Id.toFixed(2) + 'mA', xOf(ST.Vds)+8, yOf(ST.Id)-4);
+
+  if (leg) {
+    const add = (color, label, dashed) => {
+      const item = document.createElement('span'); item.className = 'leg-item';
+      const line = document.createElement('span'); line.className = 'leg-line' + (dashed ? ' dashed' : '');
+      line.style.borderColor = color; item.appendChild(line);
+      const t = document.createElement('span'); t.textContent = label; item.appendChild(t); leg.appendChild(item);
+    };
+    if (RdcOhm > 0) add(COL.red, 'DC load', false);
+    add(COL.accent, 'AC load', true);
+  }
+}
+
+// ═══ Time-domain simulator ═════════════════════════════════════════════════
+/**
+ * Single-sample advance of one stage driven directly at its gate (used for J2,
+ * and as the core for J1's source/drain solve). Returns the AC output voltage
+ * (at the drain for CS, the source for SF) + the gate-source voltage.
+ */
+function stepStage(ST, vUp) {
+  const dt = 1/SR, dev = ST.dev;
+  const Rgl = ST.Rgl || 1e6, Cin = ST.Cin || 0, Cout = ST.Cout || 0;
+  const Rs = ST.Rs, Cs = ST.Cs || 0, RsK = Rs/1000, RdK = ST.Rd/1000;
+  const RloadK = (ST.Rload || 1e12)/1000;
+  const vGrid = Cin > 0 ? (vUp - ST.dyn.Vc_coupling_in) : vUp;
+  const qNode = ST.isSF ? ST.Vs : ST.Vd;
+  const VcAbs = Cout > 0 ? (qNode + ST.dyn.Vc_coupling_out) : null;
+
+  let nodeV, Vgk;
+  if (ST.isSF) {
+    // Source-follower: solve the source node (drain at V+, no Rd, no bypass).
+    let lo = 0, hi = ST.VCC;
+    for (let i = 0; i < 32; i++) {
+      const Vs = (lo + hi) / 2;
+      const id = jfetId(ST.VCC - Vs, Math.min(vGrid - Vs, Vphi), dev);
+      const out = Vs / RsK + (VcAbs != null ? (Vs - VcAbs) / RloadK : 0);
+      if (id > out) lo = Vs; else hi = Vs;
+    }
+    const Vs = (lo + hi) / 2;
+    ST.dyn.Vs_inst = Vs;
+    Vgk = vGrid - Vs;
+    nodeV = VcAbs != null ? (Vs - VcAbs) : (Vs - ST.Vs);
+  } else {
+    // Common-source: solve the drain node, source held or instantaneous.
+    const capHeld = Cs > 0 && (Rs * Cs) >= 8 * dt;
+    let Vd, Id, VsNow;
+    if (capHeld) {
+      VsNow = ST.dyn.Vs_inst;
+      let lo = Vds_floor, hi = ST.VCC;
+      for (let i = 0; i < 30; i++) {
+        const mid = (lo + hi) / 2;
+        const f = (ST.VCC - mid)/RdK - jfetId(mid - VsNow, Math.min(vGrid - VsNow, Vphi), dev)
+                  - (VcAbs != null ? (mid - VcAbs)/RloadK : 0);
+        if (f > 0) lo = mid; else hi = mid;
+      }
+      Vd = (lo + hi) / 2;
+      Id = Math.max(0, (ST.VCC - Vd)/RdK - (VcAbs != null ? (Vd - VcAbs)/RloadK : 0));
+      ST.dyn.Vs_inst += dt * (Id * Rs/1000 - VsNow) / (Rs * Cs);
+    } else {
+      let lo = Vds_floor, hi = ST.VCC;
+      for (let i = 0; i < 32; i++) {
+        const mid = (lo + hi) / 2;
+        const ipLoad = (ST.VCC - mid)/RdK - (VcAbs != null ? (mid - VcAbs)/RloadK : 0);
+        const vsC = Math.max(0, RsK * ipLoad);
+        const f = ipLoad - jfetId(mid - vsC, Math.min(vGrid - vsC, Vphi), dev);
+        if (f > 0) lo = mid; else hi = mid;
+      }
+      Vd = (lo + hi) / 2;
+      Id = Math.max(0, (ST.VCC - Vd)/RdK - (VcAbs != null ? (Vd - VcAbs)/RloadK : 0));
+      VsNow = Math.max(0, RsK * Id);
+      ST.dyn.Vs_inst = VsNow;
+    }
+    Vgk = vGrid - ST.dyn.Vs_inst;
+    nodeV = VcAbs != null ? (Vd - VcAbs) : (Vd - ST.Vd);
+  }
+
+  // Gate conduction (input side): charges Cin (blocking).
+  const I_leak = vGrid / Rgl;
+  const I_cond = Vgk > Vphi ? (Vgk - Vphi) / (Rg_cond + (ST.Rg || 0)) : 0;
+  if (Cin > 0) {
+    const kIn = 1/Rgl + (Vgk > Vphi ? 1/(Rg_cond + (ST.Rg || 0)) : 0);
+    ST.dyn.Vc_coupling_in += (dt * (I_leak + I_cond)/Cin) / (1 + dt * kIn / Cin);
+  }
+  // Output coupling-cap relaxation (HP corner).
+  if (Cout > 0) {
+    ST.dyn.Vc_coupling_out += (dt * nodeV / (Cout * (ST.Rload || 1e12))) / (1 + dt / (Cout * (ST.Rload || 1e12)));
+  }
+  return { vOutAC: nodeV, Vgk, vGrid, I_cond };
+}
+
+/**
+ * Driving stage (J1) with the interstage network + J2's gate-conduction branch
+ * solved as one coupled system per sample. Mirrors the preamp's stepDriverStage
+ * but with the output node being the drain (CS) or source (SF).
+ */
+function stepDriverStage(ST, vUp, net, nextStage) {
+  const dt = 1/SR, dev = ST.dev;
+  const Rgl = ST.Rgl || 1e6, Cin = ST.Cin || 0, Cout = ST.Cout || 0;
+  const Rs = ST.Rs, Cs = ST.Cs || 0, RsK = Rs/1000, RdK = ST.Rd/1000;
+  const vGrid = Cin > 0 ? (vUp - ST.dyn.Vc_coupling_in) : vUp;
+  const qNode = ST.isSF ? ST.Vs : ST.Vd;
+  const VcAbs = Cout > 0 ? (qNode + ST.dyn.Vc_coupling_out) : qNode;
+
+  const alpha = (net && net.w > 0) ? net.attenLinear : 0;
+  const RL0_ohm = net ? (net.Rseries + net.Rpot) : (ST.Rload || 1e12);
+  const RL0K = RL0_ohm / 1000;
+  const gridOn = !!(nextStage && alpha > 0);
+  const vkB = gridOn ? nextStage.dyn.Vs_inst : 0;
+  const RgBr_ohm = gridOn ? (net.sourceZ + (nextStage.Rg || 0) + Rg_cond) : Infinity;
+  const RgBrK = RgBr_ohm / 1000;
+
+  // Network current drawn from the output node (mA), as a function of node V.
+  const iX_mA = (vNode) => {
+    const vX = vNode - VcAbs;
+    let i = vX / RL0K;
+    if (gridOn) { const over = alpha * vX - vkB; if (over > Vphi) i += alpha * ((over - Vphi) / RgBrK); }
+    return i;
+  };
+
+  let nodeOutAC, vX, Vgk, iG_A = 0;
+  if (ST.isSF) {
+    // SF driver: solve source node; load current leaves through Cout into network.
+    let lo = 0, hi = ST.VCC;
+    for (let i = 0; i < 32; i++) {
+      const Vs = (lo + hi) / 2;
+      const id = jfetId(ST.VCC - Vs, Math.min(vGrid - Vs, Vphi), dev);
+      if (id > Vs/RsK + iX_mA(Vs)) lo = Vs; else hi = Vs;
+    }
+    const Vs = (lo + hi) / 2;
+    ST.dyn.Vs_inst = Vs;
+    Vgk = vGrid - Vs;
+    vX = Vs - VcAbs;
+    nodeOutAC = vX;
+  } else {
+    const capHeld = Cs > 0 && (Rs * Cs) >= 8 * dt;
+    let Vd, Id, VsNow;
+    if (capHeld) {
+      VsNow = ST.dyn.Vs_inst;
+      let lo = Vds_floor, hi = ST.VCC;
+      for (let i = 0; i < 30; i++) {
+        const mid = (lo + hi) / 2;
+        const f = (ST.VCC - mid)/RdK - iX_mA(mid) - jfetId(mid - VsNow, Math.min(vGrid - VsNow, Vphi), dev);
+        if (f > 0) lo = mid; else hi = mid;
+      }
+      Vd = (lo + hi) / 2;
+      Id = Math.max(0, (ST.VCC - Vd)/RdK - iX_mA(Vd));
+      ST.dyn.Vs_inst += dt * (Id * Rs/1000 - VsNow) / (Rs * Cs);
+    } else {
+      let lo = Vds_floor, hi = ST.VCC;
+      for (let i = 0; i < 32; i++) {
+        const mid = (lo + hi) / 2;
+        const ipLoad = (ST.VCC - mid)/RdK - iX_mA(mid);
+        const vsC = Math.max(0, RsK * ipLoad);
+        const f = ipLoad - jfetId(mid - vsC, Math.min(vGrid - vsC, Vphi), dev);
+        if (f > 0) lo = mid; else hi = mid;
+      }
+      Vd = (lo + hi) / 2;
+      Id = Math.max(0, (ST.VCC - Vd)/RdK - iX_mA(Vd));
+      VsNow = Math.max(0, RsK * Id);
+      ST.dyn.Vs_inst = VsNow;
+    }
+    Vgk = vGrid - ST.dyn.Vs_inst;
+    vX = Vd - VcAbs;
+    nodeOutAC = vX;
+  }
+
+  // This stage's own input-side gate conduction (blocking on J1's input cap).
+  const I_leak = vGrid / Rgl;
+  const I_cond = Vgk > Vphi ? (Vgk - Vphi) / (Rg_cond + (ST.Rg || 0)) : 0;
+  if (Cin > 0) {
+    const kIn = 1/Rgl + (Vgk > Vphi ? 1/(Rg_cond + (ST.Rg || 0)) : 0);
+    ST.dyn.Vc_coupling_in += (dt * (I_leak + I_cond)/Cin) / (1 + dt * kIn / Cin);
+  }
+
+  // Shared coupling-cap update with the total current (network + reflected gate).
+  if (gridOn) { const over = alpha * vX - vkB; if (over > Vphi) iG_A = (over - Vphi) / RgBr_ohm; }
+  const iX_A = vX / RL0_ohm + alpha * iG_A;
+  if (Cout > 0) {
+    const kX = 1/RL0_ohm + (iG_A > 0 ? (alpha*alpha)/RgBr_ohm : 0);
+    ST.dyn.Vc_coupling_out += (dt * iX_A / Cout) / (1 + dt * kX / Cout);
+  }
+  const vW = alpha * vX - (gridOn ? iG_A * net.sourceZ : 0);
+  return { vOutAC: nodeOutAC, vW, Vgk, vGrid, I_cond, iG_A };
+}
+
+function resetDynamicState(ST) {
+  ST.dyn.Vs_inst = ST.Vs;
+  ST.dyn.Vc_coupling_in = 0;
+  ST.dyn.Vc_coupling_out = 0;
+}
+
+/** Cascaded simulator: J1 + network + J2 in one lock-step pass. */
+function simulateChain(inputPeak, freqHz) {
+  if (!ST_J1) return null;
+  const tauA = Math.max((ST_J1.Cin||0)*(ST_J1.Rgl||0), (ST_J1.Cs||0)*ST_J1.Rs, (ST_J1.Cout||0)*(ST_J1.Rload||0));
+  const tauB = ST_J2 ? Math.max((ST_J2.Cin||0)*(ST_J2.Rgl||0), (ST_J2.Cs||0)*ST_J2.Rs, (ST_J2.Cout||0)*(ST_J2.Rload||0)) : 0;
+  const tauMax = Math.max(tauA, tauB);
+  const settleSec = Math.max(NCYCLES / freqHz, 5 * tauMax);
+  const totalSamples = Math.max(Math.round(settleSec * SR), 128);
+  const displayCycles = freqHz >= 2000 ? 4 : 2;
+  const windowSamples = Math.min(600, Math.max(32, Math.round(displayCycles * SR / freqHz)));
+  const captureStart = Math.max(0, totalSamples - windowSamples);
+
+  resetDynamicState(ST_J1);
+  if (ST_J2) resetDynamicState(ST_J2);
+
+  const dt = 1/SR;
+  const aSamples = new Array(windowSamples), bSamples = new Array(windowSamples);
+  const aVg = new Array(windowSamples), bVg = new Array(windowSamples);
+  let aVgkSum=0, aVkSum=0, aCond=0, bVgkSum=0, bVkSum=0, bCond=0;
+  let aGmin=Infinity, aGmax=-Infinity, aGsum=0, bGmin=Infinity, bGmax=-Infinity, bGsum=0;
+  let aIcondSum=0, gIgSum=0, write=0;
+
+  for (let i = 0; i < totalSamples; i++) {
+    const t = i * dt;
+    const vInA = inputPeak * Math.sin(2 * Math.PI * freqHz * t);
+    const aOut = stepDriverStage(ST_J1, vInA, ST_NET, ST_J2);
+    let bOut = null;
+    if (ST_J2) bOut = stepStage(ST_J2, aOut.vW);
+
+    if (i >= captureStart) {
+      aSamples[write] = aOut.vOutAC; aVg[write] = aOut.Vgk;
+      aVgkSum += aOut.Vgk; aVkSum += ST_J1.dyn.Vs_inst;
+      if (aOut.Vgk > Vphi) aCond++;
+      if (aOut.vGrid < aGmin) aGmin = aOut.vGrid;
+      if (aOut.vGrid > aGmax) aGmax = aOut.vGrid;
+      aGsum += aOut.vGrid; aIcondSum += aOut.I_cond; gIgSum += aOut.iG_A;
+      if (bOut) {
+        bSamples[write] = bOut.vOutAC; bVg[write] = bOut.Vgk;
+        bVgkSum += bOut.Vgk; bVkSum += ST_J2.dyn.Vs_inst;
+        if (bOut.Vgk > Vphi) bCond++;
+        if (bOut.vGrid < bGmin) bGmin = bOut.vGrid;
+        if (bOut.vGrid > bGmax) bGmax = bOut.vGrid;
+        bGsum += bOut.vGrid;
+      } else { bSamples[write] = 0; bVg[write] = 0; }
+      write++;
+    }
+  }
+  const n = windowSamples || 1;
+  ST_J1.dyn.dcGateShift = aVgkSum/n + ST_J1.Vs;
+  ST_J1.dyn.dcSourceShift = aVkSum/n - ST_J1.Vs;
+  ST_J1.dyn.gateClampRatio = aCond/n;
+  ST_J1.dyn.gridMin = aGmin; ST_J1.dyn.gridMax = aGmax; ST_J1.dyn.gridMean = aGsum/n;
+  if (ST_J2) {
+    ST_J2.dyn.dcGateShift = bVgkSum/n + ST_J2.Vs;
+    ST_J2.dyn.dcSourceShift = bVkSum/n - ST_J2.Vs;
+    ST_J2.dyn.gateClampRatio = bCond/n;
+    ST_J2.dyn.gridMin = bGmin; ST_J2.dyn.gridMax = bGmax; ST_J2.dyn.gridMean = bGsum/n;
+  }
+
+  // Blocking severity — mean gate-conduction current × discharge resistance,
+  // relative to half the gate-bias headroom (|Vgs_Q|).
+  {
+    const headA = Math.max(0.2, Math.abs(ST_J1.Vgs));
+    const dispA = (ST_J1.Cin > 0) ? (aIcondSum/n) * (ST_J1.Rgl || 1e6) : 0;
+    ST_J1.dyn.blkDisp = -dispA;
+    ST_J1.dyn.blkSeverity = dispA / (0.5 * headA);
+    ST_J1.dyn.blocking = ST_J1.dyn.blkSeverity >= 1;
+    if (ST_J2) {
+      const headB = Math.max(0.2, Math.abs(ST_J2.Vgs));
+      const alpha = (ST_NET && ST_NET.w > 0) ? ST_NET.attenLinear : 0;
+      const RL0 = ST_NET ? (ST_NET.Rseries + ST_NET.Rpot) : 0;
+      const dispB = (ST_J1.Cout > 0) ? alpha*alpha*(gIgSum/n)*RL0 : 0;
+      ST_J2.dyn.blkDisp = -dispB;
+      ST_J2.dyn.blkSeverity = dispB / (0.5 * headB);
+      ST_J2.dyn.blocking = ST_J2.dyn.blkSeverity >= 1;
+    }
+  }
+  return { a: aSamples, b: bSamples, vgA: aVg, vgB: bVg, windowSamples, freqHz };
+}
+
+// ═══ Waveform rendering ════════════════════════════════════════════════════
+function renderWaveform(ctx, W, H, ST, output, inPeak) {
+  const pad = { top: 16, right: 16, bottom: 16, left: 16 };
+  const pw = W - pad.left - pad.right, plotH = H - pad.top - pad.bottom;
+  const midY = pad.top + plotH/2;
+  ctx.fillStyle = COL.bg; ctx.beginPath(); ctx.roundRect(0,0,W,H,6); ctx.fill();
+  if (!ST || !output || output.length === 0) return;
+
+  ctx.setLineDash([3,3]); ctx.strokeStyle = COL.textLight; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(pad.left, midY); ctx.lineTo(pad.left+pw, midY); ctx.stroke(); ctx.setLineDash([]);
+
+  let posPeak = 0, negPeak = 0;
+  for (let i = 0; i < output.length; i++) { if (output[i] > posPeak) posPeak = output[i]; if (output[i] < negPeak) negPeak = output[i]; }
+  const outputPeak = Math.max(posPeak, -negPeak, 0.05);
+  const outputScale = (plotH * 0.44) / outputPeak;
+
+  // Clip-reference rails on the live load line.
+  const Voff = (ST.dyn && isFinite(ST.dyn.Vc_coupling_out)) ? ST.dyn.Vc_coupling_out : 0;
+  const qNode = ST.isSF ? ST.Vs : ST.Vd;
+  const VcAbs = qNode + Voff;
+  const loadRef = (ST.Cout > 0) ? VcAbs : null;
+  const ref = { VCC: ST.VCC, Rd: ST.Rd, Rs: ST.Rs, Rload: ST.Rload, Vs: ST.Vs, dev: ST.dev, config: ST.config };
+  const nodeCut = solveNode(ref, ST.dev.VP - 5, loadRef);
+  const nodeCon = solveNode(ref, Vphi, loadRef);
+  // AC-frame clip levels (output = node − VcAbs).
+  const topClip = ST.isSF ? (nodeCon - VcAbs) : (nodeCut - VcAbs);
+  const botClip = ST.isSF ? (nodeCut - VcAbs) : (nodeCon - VcAbs);
+  const top = pad.top, bot = pad.top + plotH;
+
+  const AvEff = Math.abs(ST.isSF ? ST.Av : (ST.Cs ? ST.Av : ST.Av_unbypassed));
+  const gMean = (ST.dyn && isFinite(ST.dyn.gridMean)) ? ST.dyn.gridMean : 0;
+  const gMax = (ST.dyn && isFinite(ST.dyn.gridMax)) ? ST.dyn.gridMax : gMean;
+  const gMin = (ST.dyn && isFinite(ST.dyn.gridMin)) ? ST.dyn.gridMin : gMean;
+  const demandTop = AvEff * Math.max(0, ST.isSF ? (gMax - gMean) : (gMean - gMin));
+  const demandBot = AvEff * Math.max(0, ST.isSF ? (gMean - gMin) : (gMax - gMean));
+
+  function railLine(val) {
+    const y = midY - val * outputScale;
+    if (y < top + 1 || y > bot - 1) return;
+    ctx.setLineDash([4,3]); ctx.strokeStyle = COL.accent; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+pw, y); ctx.stroke(); ctx.setLineDash([]);
+  }
+  railLine(topClip); railLine(botClip);
+
+  ctx.strokeStyle = COL.red; ctx.lineWidth = 2; ctx.beginPath();
+  for (let i = 0; i < output.length; i++) {
+    const x = pad.left + (i/output.length)*pw, y = midY - output[i]*outputScale;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  function fmtSigned(v) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1); }
+  function cornerReadout(isTop) {
+    const clipV = isTop ? topClip : botClip;
+    const ceiling = Math.abs(clipV);
+    const peak = Math.abs(isTop ? posPeak : negPeak);
+    const demand = isTop ? demandTop : demandBot;
+    const tag = isTop ? (ST.isSF ? 'cond' : 'cutoff') : (ST.isSF ? 'cutoff' : 'cond');
+    const prefix = tag + ' ' + fmtSigned(clipV) + ' V · peak ' + fmtSigned(isTop ? posPeak : negPeak) + ' V · ';
+    const compression = Math.max(0, demand - peak);
+    const clipping = ceiling > 0.3 && demand > ceiling && compression > 0.5;
+    let deltaTxt;
+    if (clipping) { const db = Math.min(99, 20*Math.log10(demand/ceiling)); deltaTxt = '⚠ ' + db.toFixed(1) + ' dB over'; }
+    else deltaTxt = Math.max(0, ceiling - peak).toFixed(1) + ' V to clip';
+    ctx.font = '10px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = isTop ? 'top' : 'bottom';
+    const y = isTop ? top + 3 : bot - 3, x = pad.left + 4;
+    ctx.fillStyle = COL.accent; ctx.fillText(prefix, x, y);
+    ctx.fillStyle = clipping ? COL.red : COL.textLight; ctx.fillText(deltaTxt, x + ctx.measureText(prefix).width, y);
+  }
+  cornerReadout(true); cornerReadout(false);
+
+  ctx.font = 'bold 11px ' + FONT; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  ctx.fillStyle = COL.blue; ctx.fillText('in: ' + inPeak.toFixed(2) + ' Vp', pad.left + pw - 4, bot - 3);
+}
+
+function waveformVpp(samples) {
+  if (!samples || samples.length === 0) return 0;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < samples.length; i++) { const v = samples[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+  return hi - lo;
+}
+
+let LAST_CHAIN = null;
+function runChain() {
+  if (!ST_J1) { LAST_CHAIN = null; return null; }
+  LAST_CHAIN = simulateChain(getInputPeak(), getTestFreq());
+  return LAST_CHAIN;
+}
+
+function writeDynReadouts(ST, suf) {
+  const fill = $('blk-fill' + suf), val = $('blk-val' + suf);
+  function blankMeter() { fill.style.width = '0'; fill.className = 'blk-fill'; val.textContent = '—'; val.className = 'hr-value blk-val'; }
+  if (!ST) { txt('out-grid-shift' + suf, '—'); txt('out-bias-exc' + suf, '—'); blankMeter(); return; }
+  txt('out-grid-shift' + suf, ST.dyn.dcGateShift.toFixed(2));
+  txt('out-bias-exc'  + suf, ST.dyn.dcSourceShift.toFixed(2));
+  const hasCap = (suf === '2') ? !!(ST_J1 && ST_J1.Cout > 0) : (ST.Cin > 0);
+  if (!hasCap) { blankMeter(); return; }
+  const S = ST.dyn.blkSeverity || 0;
+  fill.style.width = (Math.min(S/2, 1) * 100).toFixed(1) + '%';
+  fill.className = 'blk-fill' + (S >= 1 ? ' hot' : (S >= 0.7 ? ' warn' : ''));
+  if (S >= 1) { val.textContent = ST.dyn.blkDisp.toFixed(1) + ' V'; val.className = 'hr-value blk-val hot'; }
+  else { val.textContent = (S*100).toFixed(0) + '%'; val.className = 'hr-value blk-val'; }
+}
+
+function drawWaveJ1() {
+  const c = initCanvas('chart-wave-j1');
+  if (!ST_J1) { txt('out-swing', '—'); writeDynReadouts(null, ''); if (c) renderWaveform(c.ctx, c.W, c.H, null, null, 0); return; }
+  const chain = LAST_CHAIN || runChain();
+  const output = chain ? chain.a : [];
+  txt('out-swing', waveformVpp(output).toFixed(1));
+  writeDynReadouts(ST_J1, '');
+  if (c) renderWaveform(c.ctx, c.W, c.H, ST_J1, output, getInputPeak());
+}
+
+function drawWaveJ2() {
+  const c = initCanvas('chart-wave-j2');
+  if (!ST_J1 || !ST_NET || !ST_J2 || ST_NET.w <= 0) {
+    txt('out-swing2', '—'); txt('combined-vpp', '—'); txt('out-z', '—');
+    writeDynReadouts(null, '2');
+    if (c) renderWaveform(c.ctx, c.W, c.H, null, null, 0); return;
+  }
+  const chain = LAST_CHAIN || runChain();
+  const j2Out = chain ? chain.b : [];
+  const dynB = ST_J2.dyn;
+  const inPeak = (isFinite(dynB.gridMax) && dynB.gridMax > dynB.gridMin)
+    ? (dynB.gridMax - dynB.gridMin)/2
+    : getInputPeak() * Math.abs(ST_J1.Av) * (ST_NET.attenLinear || 0);
+  if (c) renderWaveform(c.ctx, c.W, c.H, ST_J2, j2Out, inPeak);
+  txt('out-swing2', waveformVpp(j2Out).toFixed(1));
+  const attenOut = ST_OUTNET ? ST_OUTNET.attenOut : 1;
+  txt('combined-vpp', (waveformVpp(j2Out) * attenOut).toFixed(1));
+  txt('out-z', ST_OUTNET ? (ST_OUTNET.sourceZOut > 0 ? fmtR(ST_OUTNET.sourceZOut) : '0 Ω') : '—');
+  writeDynReadouts(ST_J2, '2');
+}
+
+// ═══ Frequency response ════════════════════════════════════════════════════
+/** Linear-magnitude gain of one stage at frequency f (Hz). */
+function stageGainAtFreq(ST, f) {
+  if (!ST) return 0;
+  if (ST.isSF) {
+    // Source follower: flat ≈ |Av|, with Cout/Cin high-pass corners. No Miller mult.
+    let Amag = Math.abs(ST.Av);
+    const fc_cout = ST.Cout ? 1/(2*Math.PI*ST.Cout*(ST.Zout*1000 + ST.Rload)) : 0;
+    if (fc_cout > 0) { const r = f/fc_cout; Amag *= r/Math.sqrt(1+r*r); }
+    const fc_cin = (ST.Cin && ST.Rgl) ? 1/(2*Math.PI*ST.Cin*ST.Rgl) : 0;
+    if (fc_cin > 0) { const r = f/fc_cin; Amag *= r/Math.sqrt(1+r*r); }
+    return Amag;
+  }
+  const Av = Math.abs(ST.Cs ? ST.Av : ST.Av_unbypassed);
+  // Source-bypass shelf: unbypassed → bypassed transition.
+  let Amag;
+  const fc_cs = ST.Cs ? 1/(2*Math.PI*ST.Rs*ST.Cs) : 0;
+  if (ST.Cs && fc_cs > 0) {
+    const w = 2*Math.PI*f, wRC = w*ST.Cs*ST.Rs;
+    const Aun = Math.abs(ST.Av_unbypassed), Aby = Math.abs(ST.Av);
+    // Smoothly interpolate magnitude from unbypassed (LF) to bypassed (HF).
+    const x = wRC*wRC;
+    Amag = Math.sqrt((Aun*Aun + Aby*Aby*x)/(1+x));
+  } else {
+    Amag = Math.abs(ST.Av_unbypassed);
+  }
+  const fc_cout = ST.Cout ? 1/(2*Math.PI*ST.Cout*(ST.Zout*1000 + ST.Rload)) : 0;
+  if (fc_cout > 0) { const r = f/fc_cout; Amag *= r/Math.sqrt(1+r*r); }
+  const fc_cin = (ST.Cin && ST.Rgl) ? 1/(2*Math.PI*ST.Cin*ST.Rgl) : 0;
+  if (fc_cin > 0) { const r = f/fc_cin; Amag *= r/Math.sqrt(1+r*r); }
+  const Cmiller = (ST.dev.Cgs != null ? ST.dev.Cgs : (ST.dev.Ciss - ST.dev.Crss)) * 1e-12
+                + ST.dev.Crss * 1e-12 * (1 + Av);
+  const fc_miller = ST.Rg ? 1/(2*Math.PI*ST.Rg*Cmiller) : 0;
+  if (fc_miller > 0) { const r = f/fc_miller; Amag *= 1/Math.sqrt(1+r*r); }
+  return Amag;
+}
+function stageGainDbAtFreq(ST, f) { return 20*Math.log10(Math.max(stageGainAtFreq(ST, f), 1e-10)); }
+
+function networkGainAtFreq(f) {
+  if (!ST_NET || ST_NET.w <= 0) return 0;
+  const { Rseries, Rpot_top, Rpot_bot, Cbright } = ST_NET;
+  if (!Cbright || Cbright <= 0) return ST_NET.attenLinear;
+  const w = 2*Math.PI*f, wCR = w*Cbright*Rpot_top, d2 = 1 + wCR*wCR;
+  const ZtopRe = Rpot_top/d2, ZtopIm = -Rpot_top*wCR/d2;
+  const tR = Rseries + ZtopRe + Rpot_bot, tI = ZtopIm;
+  const dm = Math.sqrt(tR*tR + tI*tI);
+  return dm > 0 ? Rpot_bot/dm : 0;
+}
+
+function drawFreqStage(canvasId, legendId, ST, opts) {
+  opts = opts || {};
+  const includeNet = !!(opts.includeNetwork && ST_NET && ST_NET.w > 0);
+  const netMidFactor = includeNet ? Math.max(ST_NET.attenLinear, 1e-10) : 1;
+  const c = initCanvas(canvasId); if (!c) return;
+  const { ctx, W, H } = c;
+  const pad = { top: 16, right: 20, bottom: 38, left: 52 };
+  const pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+  ctx.fillStyle = COL.bg; ctx.beginPath(); ctx.roundRect(0,0,W,H,6); ctx.fill();
+
+  const logMin = 0, logMax = 5;
+  let gainRefDb = 0;
+  if (ST) { const AvEff = Math.abs(ST.isSF ? ST.Av : (ST.Cs ? ST.Av : ST.Av_unbypassed)); gainRefDb = 20*Math.log10(Math.max(AvEff*netMidFactor, 1e-6)); }
+  const dbTop = gainRefDb + (includeNet ? 6 : 3), dbBot = gainRefDb - 24;
+  const xOf = f => pad.left + ((Math.log10(f) - logMin)/(logMax - logMin))*pw;
+  const yOf = db => pad.top + ((dbTop - db)/(dbTop - dbBot))*ph;
+
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 0.5;
+  for (let d = 0; d <= 5; d++) { const x = xOf(Math.pow(10,d)); ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top+ph); ctx.stroke(); }
+  for (let db = Math.ceil(dbBot/6)*6; db <= dbTop; db += 6) { const y = yOf(db); ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+pw, y); ctx.stroke(); }
+  ctx.strokeStyle = COL.axis; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(pad.left, yOf(gainRefDb)); ctx.lineTo(pad.left+pw, yOf(gainRefDb)); ctx.stroke();
+
+  ctx.fillStyle = COL.text; ctx.font = '11px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ['1','10','100','1k','10k','100k'].forEach((l,i) => ctx.fillText(l, xOf(Math.pow(10,i)), pad.top+ph+8));
+  ctx.fillText('Hz', pad.left+pw/2, pad.top+ph+22);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let db = Math.ceil(dbBot/6)*6; db <= dbTop; db += 6) ctx.fillText(db.toFixed(0)+' dB', pad.left-6, yOf(db));
+  if (!ST) return;
+
+  const steps = 500;
+  const Av = Math.abs(ST.isSF ? ST.Av : (ST.Cs ? ST.Av : ST.Av_unbypassed));
+  const fc_cs = (!ST.isSF && ST.Cs) ? 1/(2*Math.PI*ST.Rs*ST.Cs) : 0;
+  const fc_cout = ST.Cout ? 1/(2*Math.PI*ST.Cout*(ST.Zout*1000 + ST.Rload)) : 0;
+  const fc_cin = (ST.Cin && ST.Rgl) ? 1/(2*Math.PI*ST.Cin*ST.Rgl) : 0;
+  const Cmiller = (ST.dev.Ciss - ST.dev.Crss)*1e-12 + ST.dev.Crss*1e-12*(1+Av);
+  const fc_miller = (!ST.isSF && ST.Rg) ? 1/(2*Math.PI*ST.Rg*Cmiller) : 0;
+
+  function drawCurve(fcVal, type, color) {
+    if (!fcVal || fcVal <= 0) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([4,3]); ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const logF = logMin + (logMax-logMin)*(i/steps), f = Math.pow(10, logF);
+      let db;
+      if (type === 'hp') { const r = f/fcVal; db = gainRefDb + 20*Math.log10(r/Math.sqrt(1+r*r)); }
+      else if (type === 'lp') { const r = f/fcVal; db = gainRefDb + 20*Math.log10(1/Math.sqrt(1+r*r)); }
+      else if (type === 'shelf') {
+        const w = 2*Math.PI*f, wRC = w*ST.Cs*ST.Rs, x = wRC*wRC;
+        const Aun = Math.abs(ST.Av_unbypassed), Aby = Math.abs(ST.Av);
+        const Amag = Math.sqrt((Aun*Aun + Aby*Aby*x)/(1+x));
+        db = 20*Math.log10(Math.max(Amag*netMidFactor, 1e-10));
+      } else if (type === 'net') {
+        const netG = networkGainAtFreq(f); db = gainRefDb + 20*Math.log10(Math.max(netG/netMidFactor, 1e-10));
+      }
+      const y = yOf(Math.max(Math.min(db, dbTop), dbBot)), x = xOf(f);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (fc_cs > 0) drawCurve(fc_cs, 'shelf', COL.orange);
+  if (fc_cout > 0) drawCurve(fc_cout, 'hp', COL.blue);
+  if (fc_cin > 0) drawCurve(fc_cin, 'hp', COL.purple);
+  if (fc_miller > 0) drawCurve(fc_miller, 'lp', COL.red);
+  if (includeNet) drawCurve(1, 'net', COL.green);
+
+  function compositeDb(f) { let db = stageGainDbAtFreq(ST, f); if (includeNet) db += 20*Math.log10(Math.max(networkGainAtFreq(f), 1e-10)); return db; }
+  ctx.strokeStyle = COL.accent; ctx.lineWidth = 2; ctx.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const logF = logMin + (logMax-logMin)*(i/steps), f = Math.pow(10, logF);
+    const y = yOf(Math.max(Math.min(compositeDb(f), dbTop), dbBot));
+    if (i === 0) ctx.moveTo(xOf(f), y); else ctx.lineTo(xOf(f), y);
+  }
+  ctx.stroke();
+
+  const y3 = yOf(gainRefDb - 3);
+  ctx.strokeStyle = COL.red; ctx.lineWidth = 0.7; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(pad.left, y3); ctx.lineTo(pad.left+pw, y3); ctx.stroke(); ctx.setLineDash([]);
+  const target = gainRefDb - 3; let fLo = null, fHi = null;
+  for (let lf = logMin; lf <= logMax; lf += 0.005) { const f = Math.pow(10, lf); if (compositeDb(f) >= target) { fLo = f; break; } }
+  for (let lf = logMax; lf >= logMin; lf -= 0.005) { const f = Math.pow(10, lf); if (compositeDb(f) >= target) { fHi = f; break; } }
+  ctx.font = 'bold 11px ' + FONT;
+  function markCorner(fc) {
+    if (!fc) return;
+    const x = xOf(fc);
+    if (Math.log10(fc) <= logMin + 0.1 || Math.log10(fc) >= logMax - 0.1) return;
+    ctx.fillStyle = COL.red; ctx.beginPath(); ctx.arc(x, y3, 3.5, 0, Math.PI*2); ctx.fill();
+    ctx.setLineDash([2,2]); ctx.strokeStyle = COL.red; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(x, y3+5); ctx.lineTo(x, pad.top+ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = COL.red; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(fmtFreqShort(fc), x, y3+6);
+  }
+  markCorner(fLo); markCorner(fHi);
+  ctx.fillStyle = COL.red; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('-3 dB', pad.left+pw-4, y3-4);
+
+  const legend = $(legendId); if (legend) {
+    legend.innerHTML = '';
+    const add = (color, label, fcVal, dashed) => {
+      const item = document.createElement('span'); item.className = 'leg-item';
+      const line = document.createElement('span'); line.className = 'leg-line' + (dashed ? ' dashed' : ''); line.style.borderColor = color; item.appendChild(line);
+      const t = document.createElement('span'); t.innerHTML = label + (fcVal ? ' <span class="leg-fc">' + fmtFreqShort(fcVal) + '</span>' : ''); item.appendChild(t); legend.appendChild(item);
+    };
+    add(COL.accent, 'Combined', null, false);
+    if (fc_cs > 0) add(COL.orange, 'Cs', fc_cs, true);
+    if (fc_cout > 0) add(COL.blue, 'Cout', fc_cout, true);
+    if (fc_cin > 0) add(COL.purple, 'Cin', fc_cin, true);
+    if (fc_miller > 0) add(COL.red, 'Miller', fc_miller, true);
+    if (includeNet) add(COL.green, 'Network', null, true);
+  }
+}
+
+function drawFreqCombined() {
+  const c = initCanvas('chart-freq-combined'); if (!c) return;
+  const { ctx, W, H } = c;
+  const pad = { top: 16, right: 20, bottom: 38, left: 52 };
+  const pw = W - pad.left - pad.right, ph = H - pad.top - pad.bottom;
+  ctx.fillStyle = COL.bg; ctx.beginPath(); ctx.roundRect(0,0,W,H,6); ctx.fill();
+  const logMin = 0, logMax = 5;
+  const avA = ST_J1 ? Math.abs(ST_J1.isSF ? ST_J1.Av : (ST_J1.Cs ? ST_J1.Av : ST_J1.Av_unbypassed)) : 0;
+  const avB = ST_J2 ? Math.abs(ST_J2.isSF ? ST_J2.Av : (ST_J2.Cs ? ST_J2.Av : ST_J2.Av_unbypassed)) : 0;
+  let refDb = 0;
+  if (ST_J1 && ST_NET && ST_J2) refDb = 20*Math.log10(Math.max(avA,1e-6)) + 20*Math.log10(Math.max(ST_NET.attenLinear,1e-10)) + 20*Math.log10(Math.max(avB,1e-6));
+  else if (ST_J1) refDb = 20*Math.log10(Math.max(avA,1e-6));
+  const dbTop = refDb + 6, dbBot = refDb - 30;
+  const xOf = f => pad.left + ((Math.log10(f)-logMin)/(logMax-logMin))*pw;
+  const yOf = db => pad.top + ((dbTop-db)/(dbTop-dbBot))*ph;
+
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 0.5;
+  for (let d = 0; d <= 5; d++) { const x = xOf(Math.pow(10,d)); ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top+ph); ctx.stroke(); }
+  for (let db = Math.ceil(dbBot/6)*6; db <= dbTop; db += 6) { const y = yOf(db); if (y>=pad.top && y<=pad.top+ph) { ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+pw, y); ctx.stroke(); } }
+  ctx.fillStyle = COL.text; ctx.font = '11px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ['1','10','100','1k','10k','100k'].forEach((l,i) => ctx.fillText(l, xOf(Math.pow(10,i)), pad.top+ph+8));
+  ctx.fillText('Hz', pad.left+pw/2, pad.top+ph+22);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let db = Math.ceil(dbBot/6)*6; db <= dbTop; db += 6) { const y = yOf(db); if (y>=pad.top && y<=pad.top+ph) ctx.fillText(db.toFixed(0)+' dB', pad.left-6, y); }
+
+  if (!ST_J1 || !ST_NET || !ST_J2 || ST_NET.w <= 0) return;
+  const steps = 600;
+  const comb = f => 20*Math.log10(Math.max(stageGainAtFreq(ST_J1,f)*networkGainAtFreq(f)*stageGainAtFreq(ST_J2,f), 1e-10));
+  ctx.strokeStyle = COL.accent; ctx.lineWidth = 2.5; ctx.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const logF = logMin + (logMax-logMin)*(i/steps), f = Math.pow(10, logF);
+    const y = yOf(Math.max(Math.min(comb(f), dbTop), dbBot));
+    if (i === 0) ctx.moveTo(xOf(f), y); else ctx.lineTo(xOf(f), y);
+  }
+  ctx.stroke();
+
+  const y3 = yOf(refDb - 3);
+  ctx.strokeStyle = COL.red; ctx.lineWidth = 0.7; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(pad.left, y3); ctx.lineTo(pad.left+pw, y3); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = COL.red; ctx.font = 'bold 11px ' + FONT; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText('-3 dB', pad.left+pw-4, y3-4);
+  const target = refDb - 3; let fLo = null, fHi = null;
+  for (let lf = logMin; lf <= logMax; lf += 0.005) { const f = Math.pow(10, lf); if (comb(f) >= target) { fLo = f; break; } }
+  for (let lf = logMax; lf >= logMin; lf -= 0.005) { const f = Math.pow(10, lf); if (comb(f) >= target) { fHi = f; break; } }
+  function markCorner(fc) {
+    if (!fc || Math.log10(fc) <= logMin+0.1 || Math.log10(fc) >= logMax-0.1) return;
+    const x = xOf(fc); ctx.fillStyle = COL.red; ctx.beginPath(); ctx.arc(x, y3, 3.5, 0, Math.PI*2); ctx.fill();
+    ctx.setLineDash([2,2]); ctx.strokeStyle = COL.red; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(x, y3+5); ctx.lineTo(x, pad.top+ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = COL.red; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.font = 'bold 11px ' + FONT; ctx.fillText(fmtFreqShort(fc), x, y3+6);
+  }
+  markCorner(fLo); markCorner(fHi);
+
+  const fTest = getTestFreq();
+  if (fTest >= Math.pow(10, logMin) && fTest <= Math.pow(10, logMax)) {
+    const xT = xOf(fTest);
+    ctx.strokeStyle = COL.textLight; ctx.lineWidth = 1; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.moveTo(xT, pad.top); ctx.lineTo(xT, pad.top+ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = COL.textLight; ctx.font = '10px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(fmtFreqShort(fTest), xT+4, pad.top+2);
+  }
+}
+
+function fmtFreqShort(f) {
+  if (f >= 1e6) return (f/1e6).toPrecision(3) + 'M';
+  if (f >= 1e3) return (f/1e3).toPrecision(3) + 'k';
+  if (f >= 1) return f.toPrecision(3) + 'Hz';
+  return f.toPrecision(2) + 'Hz';
+}
+
+// ═══ Init ═════════════════════════════════════════════════════════════════
+fillDeviceSelect('in-dev');
+fillDeviceSelect('in-dev2');
+applyConfigVisibility('');
+applyConfigVisibility('2');
+txt('freq-val', fmtTestFreq(getTestFreq()));
+
+const REPORT_STORAGE_KEY = 'jfet-report-views';
+const REPORT_DEFAULTS = { freq: true, waves: true, curves: false, cards: false, glossary: false };
+function loadReportState() { try { const raw = localStorage.getItem(REPORT_STORAGE_KEY); if (!raw) return Object.assign({}, REPORT_DEFAULTS); return Object.assign({}, REPORT_DEFAULTS, JSON.parse(raw)); } catch (_) { return Object.assign({}, REPORT_DEFAULTS); } }
+function saveReportState(s) { try { localStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(s)); } catch (_) {} }
+function applyReportState(s) {
+  document.querySelectorAll('.report-section[data-report]').forEach(sec => sec.hidden = !s[sec.dataset.report]);
+  document.querySelectorAll('.report-controls input[data-report]').forEach(cb => cb.checked = !!s[cb.dataset.report]);
+}
+const reportState = loadReportState();
+applyReportState(reportState);
+document.querySelectorAll('.report-controls input[data-report]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    reportState[cb.dataset.report] = cb.checked; saveReportState(reportState); applyReportState(reportState);
+    if (cb.checked) requestAnimationFrame(() => requestAnimationFrame(() => drawAll()));
+  });
+});
+
+(function () {
+  const bar = document.getElementById('transport-bar'); if (!bar) return;
+  let stuck = false;
+  const onScroll = () => { const top = bar.getBoundingClientRect().top; const ns = top <= 1; if (ns !== stuck) { stuck = ns; bar.classList.toggle('is-stuck', stuck); } };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll); onScroll();
+})();
+
+requestAnimationFrame(() => recalc());
+window.addEventListener('resize', () => drawAll());
+</script>
+</body>
+</html>
