@@ -1338,9 +1338,10 @@ function initCanvas(id) {
   return { ctx, W: rect.width, H: rect.height };
 }
 const FONT = (getComputedStyle(document.documentElement).getPropertyValue('--font-mono') || 'monospace').trim();
+const cssVar = (n, fb) => ((getComputedStyle(document.documentElement).getPropertyValue(n) || fb).trim());
 const COL = {
-  bg:'#f5f6f8', grid:'#e4e7ec', axis:'#d0d4dc', text:'#555d6e', textLight:'#8a92a1',
-  accent:'#1a7d5a', red:'#c0392b', blue:'#4a6fa5', orange:'#d4760a', purple:'#7b4fb0', green:'#2d8a55'
+  bg:cssVar('--chart-bg','#faf6ee'), grid:cssVar('--chart-grid','#e6dccd'), axis:cssVar('--chart-axis','#d8ccb8'), text:cssVar('--chart-text','#6b6154'), textLight:cssVar('--chart-text-light','#9a8f80'),
+  accent:cssVar('--chart-1','#0e7b88'), red:cssVar('--chart-2','#9c4f2f'), blue:cssVar('--chart-5','#3a5e8c'), orange:cssVar('--chart-4','#bf842b'), purple:cssVar('--chart-3','#6a4c93'), green:cssVar('--chart-6','#5f7d3a')
 };
 
 // ═══ Drain characteristics chart ══════════════════════════════════════════
@@ -1372,7 +1373,7 @@ function drawCurves(canvasId, legendId, ST) {
   const vgSteps = [];
   for (let vg = 0; vg >= dev.VP - 1e-9; vg -= vgStep) vgSteps.push(vg);
   vgSteps.forEach(vg => {
-    ctx.strokeStyle = '#c8ccd4'; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.strokeStyle = cssVar('--chart-grid-strong', '#cfc4b2'); ctx.lineWidth = 1; ctx.beginPath();
     for (let px = 0; px <= pw; px += 2) {
       const Vds = (px / pw) * VdsMax;
       const Id = jfetId(Vds, vg, dev);

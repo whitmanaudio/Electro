@@ -21,26 +21,49 @@
    inverting their rasterized contents in system dark mode.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 /* ── Tokens ─────────────────────────────────────────────────────────────── */
 :root{
   --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-  --font-mono:'SF Mono',ui-monospace,'Cascadia Code','Fira Code',Menlo,Consolas,monospace;
-  --color-bg:#ffffff;
-  --color-bg-page:#f4f6f9;
-  --color-bg-secondary:#eef0f4;
-  --color-bg-chart:#fafbfc;
-  --color-text:#1a1d23;
-  --color-text-secondary:#4a5261;
-  --color-text-tertiary:#6b7280;
-  --color-border:#d0d4dc;
-  --color-border-light:#e4e7ec;
-  --color-accent:#1a7d5a;
-  --color-accent-soft:#e6f2ed;
-  --color-focus:rgba(26,125,90,.25);
+  --font-display:'Bricolage Grotesque',var(--font-sans);
+  --font-mono:'JetBrains Mono','SF Mono',ui-monospace,'Cascadia Code','Fira Code',Menlo,Consolas,monospace;
+  /* Warm “workshop” surfaces */
+  --color-bg:#fbf8f2;
+  --color-bg-page:#f1eae0;
+  --color-bg-secondary:#ece2d4;
+  --color-bg-chart:#faf6ee;
+  --color-text:#211c16;
+  --color-text-secondary:#6b6154;
+  --color-text-tertiary:#7a6f5e;
+  --color-border:#d8ccb8;
+  --color-border-light:#e6dccd;
+  /* Petrol-teal accent (complement to the warm base) */
+  --color-accent:#0e7b88;
+  --color-accent-soft:#daedef;
+  --color-focus:rgba(14,123,136,.28);
   --radius-md:6px;
   --radius-lg:10px;
-  --shadow-card:0 1px 2px rgba(17,22,31,.04);
-  --shadow-chart:0 2px 6px rgba(17,22,31,.05),0 0 0 1px var(--color-border-light);
+  --shadow-card:0 1px 2px rgba(33,28,22,.05);
+  --shadow-chart:0 2px 6px rgba(33,28,22,.06),0 0 0 1px var(--color-border-light);
+  /* Chart palette — read by each tool's canvas renderer via getComputedStyle.
+     chart-1/2/3 are the data-trace triad: teal, clay, violet. */
+  --chart-bg:#faf6ee;
+  --chart-grid:#e6dccd;
+  --chart-axis:#d8ccb8;
+  --chart-text:#6b6154;
+  --chart-text-light:#9a8f80;
+  --chart-text-dark:#211c16;
+  --chart-1:#0e7b88;
+  --chart-2:#9c4f2f;
+  --chart-3:#6a4c93;
+  /* Extended traces (only the dense multi-curve charts use 4\u20136) */
+  --chart-4:#bf842b;
+  --chart-5:#3a5e8c;
+  --chart-6:#5f7d3a;
+  --chart-2-soft:#d8a78d;
+  --chart-5-soft:#a9b6cf;
+  --chart-grid-strong:#cfc4b2;
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────── */
@@ -64,7 +87,7 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{
 
 /* ── Header + badge ─────────────────────────────────────────────────────── */
 .header{display:flex;align-items:center;gap:12px;margin-bottom:1.75rem}
-.header-title{font-size:17px;font-weight:600;color:var(--color-text);letter-spacing:-.01em}
+.header-title{font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--color-text);letter-spacing:-.015em}
 .badge{font-size:11px;padding:3px 8px;border-radius:4px;font-family:var(--font-mono);letter-spacing:.04em;background:var(--color-bg-secondary);color:var(--color-text-secondary);border:1px solid var(--color-border-light)}
 
 /* ── Sections (cards that group content) ────────────────────────────────── */

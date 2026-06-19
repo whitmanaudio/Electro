@@ -119,15 +119,17 @@
 // ═════════════════════════════════════════════════════════════════════════
 
 // ── Shared color palette (kept in sync with other tools) ─────────────────
+const cssVar = (n, fb) => ((getComputedStyle(document.documentElement)
+                     .getPropertyValue(n) || fb).trim());
 const COL = {
-  bg:        '#fafbfc',
-  grid:      '#e4e7ec',
-  axis:      '#d0d4dc',
-  text:      '#4a5261',
-  textLight: '#6b7280',
-  textDark:  '#1a1d23',
-  red:       '#c0392b',  // low-pass, −3 dB reference
-  blue:      '#4a6fa5',  // high-pass
+  bg:        cssVar('--chart-bg',         '#faf6ee'),
+  grid:      cssVar('--chart-grid',       '#e6dccd'),
+  axis:      cssVar('--chart-axis',       '#d8ccb8'),
+  text:      cssVar('--chart-text',       '#6b6154'),
+  textLight: cssVar('--chart-text-light', '#9a8f80'),
+  textDark:  cssVar('--chart-text-dark',  '#211c16'),
+  red:       cssVar('--chart-2',          '#9c4f2f'),  // low-pass / −3 dB reference (clay)
+  blue:      cssVar('--chart-1',          '#0e7b88'),  // high-pass (teal)
 };
 
 // Chart type is always monospace for clean numeric alignment on axes and
