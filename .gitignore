@@ -1,0 +1,30 @@
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+.claude/
+
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# --- scratch ---
+.scratch/
+scratch/
+tmp/
+*.tmp
+*.bak
+*.bak_*
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+*.local
